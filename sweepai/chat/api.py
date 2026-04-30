@@ -48,37 +48,13 @@ os.makedirs(message_cache, exist_ok=True)
 
 DEFAULT_K = 8
 
-def get_cloned_repo(
-    repo_name: str,
-    access_token: str,
-    branch: str = None,
-    messages: list[Message] = [],
-):
-    org_name, repo = repo_name.split("/")
-    if branch:
-        cloned_repo = ClonedRepo(
-            repo_name,
-            token=access_token,
-            installation_id=get_cached_installation_id(org_name)
-        )
-        cloned_repo.branch = branch
-        try:
-            cloned_repo.git_repo.git.checkout(branch)
-        except Exception as e:
-            logger.warning(f"Error checking out branch {branch}: {e}. Trying to checkout PRs.")
-            for message in messages:
-                for pull in message.annotations["pulls"]:
-                    if pull["branch"] == branch:
-                        pr = cloned_repo.repo.get_pull(pull["number"])
-                        sha = pr.head.sha
-                        cloned_repo.git_repo.git.fetch("origin", sha)
-                        cloned_repo.git_repo.git.checkout(sha)
-                        logger.info(f"Checked out PR {pull['number']} with SHA {sha}")
-                        return cloned_repo
-            raise Exception(f"Branch {branch} not found")
-    else:
-        cloned_repo = MockClonedRepo(f"{repo_cache}/{repo}", repo_name, token=access_token)
-        cloned_repo.git_repo.git.pull()
+# 3. Update get_cloned_repo to use local paths
+def get_cloned_repo(repo_name: str, access_token: str, branch: str = None, messages: list[Message] = []):
+    org, repo = repo_name.split("/")
+    local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+    # Use MockClonedRepo which just reads from the local disk
+    cloned_repo = MockClonedRepo(local_path, repo_name, token="mock")
     return cloned_repo
 
 def get_pr_snippets(
@@ -213,26 +189,7 @@ def get_authenticated_github_client(
     repo_name: str,
     access_token: str
 ):
-    # Returns read access, write access, or none
-    g = Github(access_token)
-    user = g.get_user()
-    try:
-        repo = g.get_repo(repo_name)
-        return g
-    except Exception:
-        org_name, _ = repo_name.split("/")
-        try:
-            _token, g = get_github_client_from_org(org_name)
-        except Exception as e:
-            raise Exception(f"Error getting installation for {repo_name}: {e}. Double-check if the app is installed for this repo.")
-        try:
-            repo = g.get_repo(repo_name)
-        except Exception as e:
-            raise Exception(f"Error getting repo {repo_name}: {e}")
-        if repo.has_in_collaborators(user.login):
-            return g
-        else:
-            raise Exception(f"User {user.login} does not have the necessary permissions for the repository {repo_name}.")
+    return True
 
 async def get_token_header(authorization: str = Header(...)):
     if not authorization.startswith("Bearer "):
@@ -241,14 +198,11 @@ async def get_token_header(authorization: str = Header(...)):
 
 @app.get("/backend/repo")
 def check_repo_exists_endpoint(repo_name: str, access_token: str = Depends(get_token_header)):
-    try:
-        g = get_authenticated_github_client(repo_name, access_token)
-    except Exception as e:
-        return {"success": False, "error": f"{str(e)}"}
+    logger.info(f"[DEBUG] Checking if repo exists: {repo_name}")
 
-    username = Github(access_token).get_user().login
-
-    token = g.token if isinstance(g, CustomGithub) else access_token
+    # BYPASS GITHUB COMPLETELY
+    username = "localdev"
+    token = "mock"
 
     return check_repo_exists(
         username,
@@ -260,23 +214,32 @@ def check_repo_exists_endpoint(repo_name: str, access_token: str = Depends(get_t
     )
 
 @posthog_trace
-def check_repo_exists(
-    username: str,
-    repo_name: str,
-    access_token: str,
-    metadata: dict = {},
-):
-    org_name, repo = repo_name.split("/")
-    if os.path.exists(f"{repo_cache}/{repo}"):
+def check_repo_exists(username: str, repo_name: str, access_token: str, metadata: dict = {}):
+    # Map this to your actual local hard drive path
+    org, repo = repo_name.split("/")
+    local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+    if os.path.exists(local_path):
         return {"success": True}
-    try:
-        print(f"Cloning {repo_name} to {repo_cache}/{repo}")
-        git.Repo.clone_from(f"https://x-access-token:{access_token}@github.com/{repo_name}", f"{repo_cache}/{repo}")
-        print(f"Cloned {repo_name} to {repo_cache}/{repo}")
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    
+    return {"success": False, "error": f"Local path {local_path} does not exist."}
+
+@posthog_trace
+@app.get("/backend/repo")
+def check_repo_exists_endpoint(repo_name: str, access_token: str = Depends(get_token_header)):
+    logger.info(f"[DEBUG] Checking if repo exists: {repo_name}")
+
+    # BYPASS GITHUB COMPLETELY
+    username = "localdev"
+    token = "mock"
+
+    return check_repo_exists(
+        username,
+        repo_name,
+        token,
+        metadata={
+            "repo_name": repo_name,
+        }
+    )
 @app.post("/backend/search")
 def search_codebase_endpoint(
     repo_name: str = Body(...),
@@ -285,13 +248,10 @@ def search_codebase_endpoint(
     access_token: str = Depends(get_token_header),
     branch: str = Body(None),
 ):
-    with Timer() as timer:
-        g = get_authenticated_github_client(repo_name, access_token)
-    logger.debug(f"Getting authenticated GitHub client took {timer.time_elapsed} seconds")
-    if not g:
-        return {"success": False, "error": "The repository may not exist or you may not have access to this repository."}
-    username = Github(access_token).get_user().login
-    token = g.token if isinstance(g, CustomGithub) else access_token
+    # BYPASS GITHUB COMPLETELY
+    username = "localdev"
+    token = "mock"
+
     def stream_response():
         yield json.dumps(["Starting search...", []])
         for message, snippets in wrapped_search_codebase.stream(
@@ -321,21 +281,19 @@ def wrapped_search_codebase(
     metadata: dict = {},
 ):
     org_name, repo = repo_name.split("/")
-    if not os.path.exists(f"{repo_cache}/{repo}") and not branch:
-        yield "Cloning repository...", []
-        print(f"Cloning {repo_name} to {repo_cache}/{repo}")
-        git.Repo.clone_from(f"https://x-access-token:{access_token}@github.com/{repo_name}", f"{repo_cache}/{repo}")
-        print(f"Cloned {repo_name} to {repo_cache}/{repo}")
-        yield "Repository cloned.", []
-        cloned_repo = MockClonedRepo(f"{repo_cache}/{repo}", repo_name, token=access_token)
-    else:
-        yield f"Cloning into {repo_name}:{branch}...", []
-        cloned_repo = get_cloned_repo(repo_name, access_token, branch, [Message(
-            content=query,
-            role="user",
-            annotations=annotations,
-        )])
-        yield "Repository pulled.", []
+    local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+    logger.info(f"[DEBUG] wrapped_search_codebase called for {repo_name}")
+
+    if not os.path.exists(local_path):
+        yield f"Error: Local path {local_path} does not exist.", []
+        return
+
+    yield f"Reading local repository {repo}...", []
+
+    # Use MockClonedRepo pointing to your local disk
+    cloned_repo = MockClonedRepo(local_path, repo_name, token="mock")
+
     if annotations:
         yield "Getting pull request snippets...", []
         pr_snippets, skipped_pr_snippets, pulls_messages = get_pr_snippets(
@@ -352,9 +310,51 @@ def wrapped_search_codebase(
         repo_name,
         query,
         access_token,
-        use_optimized_query=not bool(annotations["pulls"]),
+        use_optimized_query=not bool(annotations.get("pulls")),
     ):
         yield message, snippets
+
+@streamable
+def search_codebase(
+    repo_name: str,
+    query: str,
+    access_token: str,
+    use_optimized_query: bool = True,
+):
+    with Timer() as timer:
+        org_name, repo = repo_name.split("/")
+        local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+        logger.info(f"[DEBUG] search_codebase called for {repo_name}")
+
+        cloned_repo = MockClonedRepo(local_path, repo_name, token="mock")
+        # REMOVED: cloned_repo.pull() -> We don't want to git pull a local working directory!
+
+        if use_optimized_query:
+            yield "Optimizing query...", []
+            query = call_llm(
+                system_prompt=query_optimizer_system_prompt,
+                user_prompt=query_optimizer_user_prompt,
+                params={"query": query},
+                use_openai=True
+            ).strip().removeprefix("Search query:").strip()
+            yield f"Optimized query: {query}", []
+
+        for message, snippets in prep_snippets.stream(
+            cloned_repo, query,
+            use_multi_query=False,
+            NUM_SNIPPETS_TO_KEEP=0,
+            skip_analyze_agent=True
+        ):
+            if use_optimized_query:
+                yield f"{message} (optimized query: {query})", snippets
+            else:
+                yield message, snippets
+
+    snippets = fuse_snippets(snippets)
+    yield "Fused snippets.", snippets
+    logger.debug(f"Preparing snippets took {timer.time_elapsed} seconds")
+    return snippets
 
 @streamable
 def search_codebase(
@@ -410,10 +410,9 @@ def chat_codebase(
     if len(messages) == 0:
         raise ValueError("At least one message is required.")
 
-    g = get_authenticated_github_client(repo_name, access_token)
-    assert g
-    username = Github(access_token).get_user().login
-    token = g.token if isinstance(g, CustomGithub) else access_token
+    # BYPASS GITHUB COMPLETELY
+    username = "localdev"
+    token = "mock"
 
     return chat_codebase_stream(
         username,
@@ -827,26 +826,12 @@ async def autofix(
     code_suggestions: list[CodeSuggestion] = Body(...),
     branch: str = Body(None),
     access_token: str = Depends(get_token_header)
-):# -> dict[str, Any] | StreamingResponse:
-    # for debugging with rerun_chat_modify_direct.py
-    # from dataclasses import asdict
-    # data = [asdict(query) for query in code_suggestions]
-    # with open("code_suggestions.json", "w") as file:
-    #     json.dump(data, file, indent=4)
-    with Timer() as timer:
-        g = get_authenticated_github_client(repo_name, access_token)
-    logger.debug(f"Getting authenticated GitHub client took {timer.time_elapsed} seconds")
-    if not g:
-        return {"success": False, "error": "The repository may not exist or you may not have access to this repository."}
-    
+):
     org_name, repo = repo_name.split("/")
-    installation_id = get_installation_id(org_name, GITHUB_APP_PEM, GITHUB_APP_ID)
-    cloned_repo = ClonedRepo(
-        repo_name,
-        installation_id=installation_id,
-        token=access_token,
-        branch=branch
-    )
+    local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+    # USE MOCK CLONED REPO FOR LOCAL DISK
+    cloned_repo = MockClonedRepo(local_path, repo_name, token="mock")
 
     file_change_requests = []
 
@@ -880,86 +865,50 @@ async def autofix(
 
     return StreamingResponse(stream())
 
+    def stream():
+        try:
+            for stateful_code_suggestions in modify.stream(
+                fcrs=file_change_requests,
+                request="",
+                cloned_repo=cloned_repo,
+                relevant_filepaths=[code_suggestion.file_path for code_suggestion in code_suggestions],
+            ):
+                yield json.dumps([stateful_code_suggestion.__dict__ for stateful_code_suggestion in stateful_code_suggestions])
+        except Exception as e:
+            yield json.dumps({"error": str(e)})
+            raise e
+
+    return StreamingResponse(stream())
+
 # TODO: refactor all the PR stuff together
 # TODO: refactor all the github client stuff
 
 @app.post("/backend/create_pull")
 async def create_pull(
     repo_name: str = Body(...),
-    file_changes: dict[str, str] = Body(...),
-    branch: str = Body(...),
-    title: str = Body(...),
-    body: str = Body(...),
-    base_branch: str = Body(""),
-    access_token: str = Depends(get_token_header)
+    file_changes: dict[str, str] = Body(...), # Dict of {filepath: new_code}
+    # ... other params ignored
 ):
-    with Timer() as timer:
-        g = get_authenticated_github_client(repo_name, access_token)
-    logger.debug(f"Getting authenticated GitHub client took {timer.time_elapsed} seconds")
-    if not g:
-        return {"success": False, "error": "The repository may not exist or you may not have access to this repository."}
+    org, repo = repo_name.split("/")
+    local_path = f"/Users/michal/PycharmProjects/{repo}"
     
-    org_name, repo_name_ = repo_name.split("/")
-    
-    _token, g = get_github_client_from_org(org_name) # TODO: handle users as well
-    
-    repo = g.get_repo(repo_name)
-    base_branch = base_branch or repo.default_branch
-    
-    new_branch = create_branch(repo, branch, base_branch)
-    
-    cloned_repo = MockClonedRepo(
-        f"{repo_cache}/{repo_name_}",
-        repo_name,
-        token=access_token,
-        repo=repo
-    )
-
-    commit_multi_file_changes(
-        cloned_repo,
-        file_changes,
-        commit_message=f"Updated {len(file_changes)} files",
-        branch=new_branch,
-    )
-    
-    title = title or "Sweep AI Pull Request"
-    pull_request = repo.create_pull(
-        title=title,
-        body=body,
-        head=new_branch,
-        base=base_branch,
-    )
-    g = get_authenticated_github_client(repo_name, access_token)
-    pull_request.add_to_assignees(g.get_user().login)
-    file_diffs = pull_request.get_files()
+    # Directly write the LLM's changes to your local file system!
+    for file_path, new_content in file_changes.items():
+        full_path = os.path.join(local_path, file_path)
+        with open(full_path, "w") as f:
+            f.write(new_content)
 
     return {
         "success": True,
         "pull_request": {
-            "number": pull_request.number,
+            "number": 999, # Fake PR number so the UI doesn't crash
             "repo_name": repo_name,
-            "title": title,
-            "body": body,
-            "labels": [],
-            "status": "open",
-            "file_diffs": [
-                {
-                    "sha": file.sha,
-                    "filename": file.filename,
-                    "status": file.status,
-                    "additions": file.additions,
-                    "deletions": file.deletions,
-                    "changes": file.changes,
-                    "blob_url": file.blob_url,
-                    "raw_url": file.raw_url,
-                    "contents_url": file.contents_url,
-                    "patch": file.patch,
-                    "previous_filename": file.previous_filename,
-                }
-                for file in file_diffs
-            ],
+            "title": "Local File Save",
+            "body": "Saved directly to disk.",
+            "status": "merged",
+            "file_diffs": []
         },
-        "new_branch": new_branch
+        "new_branch": "local"
     }
 
 @app.post("/backend/commit_to_pull")

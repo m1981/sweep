@@ -216,7 +216,7 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
   useEffect(() => {
     console.log('loading message', messagesId)
     if (messagesId) {
-      ;(async () => {
+      ; (async () => {
         const response = await authorizedFetch(
           `/messages/load/${messagesId}`,
           {},
@@ -282,27 +282,15 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
 
   useEffect(() => {
     if (session) {
-      const octokit = new Octokit({ auth: session.user!.accessToken })
-      setOctokit(octokit)
-      ;(async () => {
-        const maxPages = 5
-        let allRepositories: Repository[] = []
-        let page = 1
-        let response
-        do {
-          response = await octokit.rest.repos.listForAuthenticatedUser({
-            visibility: 'all',
-            sort: 'pushed',
-            per_page: 100,
-            page: page,
-          })
-          allRepositories = allRepositories.concat(response.data)
-          setRepos(allRepositories)
-          page++
-        } while (response.data.length !== 0 && page < maxPages)
-      })()
+      // Hardcode your local project paths here
+      setRepos([
+        { full_name: 'local/sweep' },
+        { full_name: 'local/another-project' },
+      ])
+      setBranch("main")
+      setBaseBranch("main")
     }
-  }, [session?.user!.accessToken])
+  }, [session])
 
   useEffect(() => {
     if (branch) {
@@ -323,7 +311,7 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
 
   useEffect(() => {
     if (repoName && octokit) {
-      ;(async () => {
+      ; (async () => {
         const repoData = await octokit.rest.repos.get({
           owner: repoName.split('/')[0],
           repo: repoName.split('/')[1],
@@ -400,8 +388,8 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
         ...args
       )
     },
-    2000,
-    { leading: true, maxWait: 5000 }
+      2000,
+      { leading: true, maxWait: 5000 }
     ), []
   ) // can tune these timeouts
 
@@ -493,80 +481,80 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
     )
     setSuggestedChanges(currentCodeSuggestions)
     setIsProcessingSuggestedChanges(true)
-    ;(async () => {
-      console.log(userMentionedPullRequest)
-      const streamedResponse = await authorizedFetch(`/autofix`, {
-        code_suggestions: codeSuggestions.map(toSnakeCaseKeys),
-        branch: commitToPR ? userMentionedPullRequest?.branch : baseBranch,
-      })
+      ; (async () => {
+        console.log(userMentionedPullRequest)
+        const streamedResponse = await authorizedFetch(`/autofix`, {
+          code_suggestions: codeSuggestions.map(toSnakeCaseKeys),
+          branch: commitToPR ? userMentionedPullRequest?.branch : baseBranch,
+        })
 
-      // TODO: casing should be automatically handled
+        // TODO: casing should be automatically handled
 
-      try {
-        for await (const currentState of streamResponseMessages(
-          streamedResponse,
-          isStream,
-          5 * 60 * 1000
-        )) {
-          // console.log(currentState)
-          if (currentState.error) {
-            throw new Error(currentState.error)
+        try {
+          for await (const currentState of streamResponseMessages(
+            streamedResponse,
+            isStream,
+            5 * 60 * 1000
+          )) {
+            // console.log(currentState)
+            if (currentState.error) {
+              throw new Error(currentState.error)
+            }
+            currentCodeSuggestions = currentState.map(toCamelCaseKeys)
+            setSuggestedChanges(currentCodeSuggestions)
           }
-          currentCodeSuggestions = currentState.map(toCamelCaseKeys)
-          setSuggestedChanges(currentCodeSuggestions)
-        }
-        if (!isStream.current) {
-          currentCodeSuggestions = currentCodeSuggestions.map((suggestion) =>
-            suggestion.state == 'done'
-              ? suggestion
-              : {
+          if (!isStream.current) {
+            currentCodeSuggestions = currentCodeSuggestions.map((suggestion) =>
+              suggestion.state == 'done'
+                ? suggestion
+                : {
                   ...suggestion,
                   originalCode:
                     suggestion.fileContents || suggestion.originalCode,
                   state: 'error',
                 }
-          )
-          setSuggestedChanges(currentCodeSuggestions)
-        }
-      } catch (e: any) {
-        console.error(e)
-        toast({
-          title: 'Failed to auto-fix changes!',
-          description:
-            'The following error occurred while applying these changes:\n\n' +
-            e.message +
-            '\n\nFeel free to shoot us a message if you keep running into this!',
-          variant: 'destructive',
-          duration: Infinity,
-        })
-        currentCodeSuggestions = currentCodeSuggestions.map((suggestion) =>
-          suggestion.state == 'done'
-            ? suggestion
-            : {
+            )
+            setSuggestedChanges(currentCodeSuggestions)
+          }
+        } catch (e: any) {
+          console.error(e)
+          toast({
+            title: 'Failed to auto-fix changes!',
+            description:
+              'The following error occurred while applying these changes:\n\n' +
+              e.message +
+              '\n\nFeel free to shoot us a message if you keep running into this!',
+            variant: 'destructive',
+            duration: Infinity,
+          })
+          currentCodeSuggestions = currentCodeSuggestions.map((suggestion) =>
+            suggestion.state == 'done'
+              ? suggestion
+              : {
                 ...suggestion,
                 originalCode:
                   suggestion.fileContents || suggestion.originalCode,
                 state: 'error',
               }
-        )
-        console.log(currentCodeSuggestions)
-        setSuggestedChanges(currentCodeSuggestions)
-        posthog_capture('auto fix error', {
-          error: e.message,
-        })
-      } finally {
-        isStream.current = false
-        setIsProcessingSuggestedChanges(false)
+          )
+          console.log(currentCodeSuggestions)
+          setSuggestedChanges(currentCodeSuggestions)
+          posthog_capture('auto fix error', {
+            error: e.message,
+          })
+        } finally {
+          isStream.current = false
+          setIsProcessingSuggestedChanges(false)
 
-        if (!featureBranch || !pullRequestTitle || !pullRequestBody) {
-          const prMetadata = await authorizedFetch(
-            '/create_pull_metadata',
-            {
-              repo_name: repoName,
-              modify_files_dict: suggestedChanges.reduce((
-                    acc: Record<
-                      string,
-                      { original_contents: string; contents: string }
+          if (!featureBranch || !pullRequestTitle || !pullRequestBody) {
+            const prMetadata = await authorizedFetch(
+              '/create_pull_metadata',
+              {
+                repo_name: repoName,
+                modify_files_dict: suggestedChanges.reduce((
+                  acc: Record<
+                    string,
+                    { original_contents: string; contents: string }
                   >,
                   suggestion: StatefulCodeSuggestion
                 ) => {
@@ -576,28 +564,28 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
                   }
                   return acc
                 },
-                {}
-              ),
-              messages,
-            }
-          )
+                  {}
+                ),
+                messages,
+              }
+            )
 
-          const prData = await prMetadata.json()
-          const { title, description, branch: featureBranch } = prData
-          setFeatureBranch(
-            featureBranch ||
+            const prData = await prMetadata.json()
+            const { title, description, branch: featureBranch } = prData
+            setFeatureBranch(
+              featureBranch ||
               'sweep-chat-suggested-changes-' +
-                new Date()
-                  .toISOString()
-                  .slice(0, 19)
-                  .replace('T', '_')
-                  .replace(':', '_')
-          )
-          setPullRequestTitle(title || 'Sweep Chat Suggested Changes')
-          setPullRequestBody(description || 'Suggested changes by Sweep Chat.')
+              new Date()
+                .toISOString()
+                .slice(0, 19)
+                .replace('T', '_')
+                .replace(':', '_')
+            )
+            setPullRequestTitle(title || 'Sweep Chat Suggested Changes')
+            setPullRequestBody(description || 'Suggested changes by Sweep Chat.')
+          }
         }
-      }
-    })()
+      })()
   }
 
   const scrollToBottom = (timeout = 0) => {
@@ -815,10 +803,10 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
         fixPrValidationErrors(currentPrValidationStatuses)
       }
     }, (error) => toast({
-        title: 'Error validating PR',
-        description: `Please try again later. ${error.message}`,
-        variant: 'destructive',
-      })
+      title: 'Error validating PR',
+      description: `Please try again later. ${error.message}`,
+      variant: 'destructive',
+    })
     )
   }
 
@@ -1052,9 +1040,8 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
           />
         )}
         <div
-          className={`mb-4 w-full flex items-center ${
-            repoNameValid || messagesId ? '' : 'grow'
-          } grow`}
+          className={`mb-4 w-full flex items-center ${repoNameValid || messagesId ? '' : 'grow'
+            } grow`}
         >
           <AutoComplete
             options={repos.map((repo) => ({
@@ -1160,104 +1147,104 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
               >
                 {messages.length > 0
                   ? messages.map((message, index) => (
-                      <MessageDisplay
-                        key={index}
-                        index={index}
-                        message={message}
-                        repoName={repoName}
-                        branch={branch}
-                        className={
-                          index == lastAssistantMessageIndex
-                            ? 'bg-slate-700'
-                            : ''
+                    <MessageDisplay
+                      key={index}
+                      index={index}
+                      message={message}
+                      repoName={repoName}
+                      branch={branch}
+                      className={
+                        index == lastAssistantMessageIndex
+                          ? 'bg-slate-700'
+                          : ''
+                      }
+                      onEdit={async (content) => {
+                        isStream.current = false
+                        setIsLoading(false)
+
+                        const pulls = await parsePullRequests(
+                          repoName,
+                          content,
+                          octokit!
+                        )
+                        if (pulls.length) {
+                          setUserMentionedPullRequest(pulls[pulls.length - 1])
+                          setCommitToPR(true)
                         }
-                        onEdit={async (content) => {
-                          isStream.current = false
-                          setIsLoading(false)
+                        let newPulls =
+                          userMentionedPullRequests && index > 0
+                            ? [...userMentionedPullRequests]
+                            : []
 
-                          const pulls = await parsePullRequests(
-                            repoName,
-                            content,
-                            octokit!
-                          )
-                          if (pulls.length) {
-                            setUserMentionedPullRequest(pulls[pulls.length - 1])
-                            setCommitToPR(true)
-                          }
-                          let newPulls =
-                            userMentionedPullRequests && index > 0
-                              ? [...userMentionedPullRequests]
-                              : []
-
-                          pulls.forEach((pull1) => {
-                            if (
-                              !newPulls.some((pull2) =>
-                                isPullRequestEqual(pull1, pull2)
-                              )
-                            ) {
-                              newPulls.push(pull1)
-                            }
-                          })
-
-                          setUserMentionedPullRequests(
-                            newPulls.length > 0 ? newPulls : null
-                          )
-
-                          if (newPulls.length > 0) {
-                            setUserMentionedPullRequest(
-                              newPulls[newPulls.length - 1]
+                        pulls.forEach((pull1) => {
+                          if (
+                            !newPulls.some((pull2) =>
+                              isPullRequestEqual(pull1, pull2)
                             )
-                          } else {
-                            setUserMentionedPullRequest(null)
-                            setCommitToPR(false)
+                          ) {
+                            newPulls.push(pull1)
                           }
+                        })
 
-                          const newMessages: Message[] = [
-                            ...messages.slice(0, index),
-                            { ...message, content, annotations: { pulls } },
-                          ]
-                          setMessages(newMessages)
-                          setIsCreatingPullRequest(false)
-                          if (index == 0) {
-                            setMessagesId('')
-                            setOriginalSuggestedChanges([])
-                            setSuggestedChanges([])
-                            setIsProcessingSuggestedChanges(false)
-                            setPullRequestTitle(null)
-                            setPullRequestBody(null)
-                            startChatStream(content, newMessages, snippets, {
-                              pulls,
-                            })
-                            setPrValidationStatuses([])
-                          } else {
-                            startChatStream(content, newMessages, snippets, {
-                              pulls,
-                            })
-                          }
-                        }}
-                        commitToPR={commitToPR}
-                        setSuggestedChanges={(suggestedChanges) => {
-                          setOriginalSuggestedChanges(suggestedChanges)
-                          setSuggestedChanges(suggestedChanges)
-                        }}
-                        onValidatePR={(pr) => validatePr(pr, index)}
-                        fixPrValidationErrors={() => {
-                          const currentPrValidationStatuses =
-                            messages[index]!.annotations!.prValidationStatuses
-                          if (currentPrValidationStatuses) {
-                            fixPrValidationErrors(currentPrValidationStatuses)
-                          }
-                        }}
-                      />
-                    ))
+                        setUserMentionedPullRequests(
+                          newPulls.length > 0 ? newPulls : null
+                        )
+
+                        if (newPulls.length > 0) {
+                          setUserMentionedPullRequest(
+                            newPulls[newPulls.length - 1]
+                          )
+                        } else {
+                          setUserMentionedPullRequest(null)
+                          setCommitToPR(false)
+                        }
+
+                        const newMessages: Message[] = [
+                          ...messages.slice(0, index),
+                          { ...message, content, annotations: { pulls } },
+                        ]
+                        setMessages(newMessages)
+                        setIsCreatingPullRequest(false)
+                        if (index == 0) {
+                          setMessagesId('')
+                          setOriginalSuggestedChanges([])
+                          setSuggestedChanges([])
+                          setIsProcessingSuggestedChanges(false)
+                          setPullRequestTitle(null)
+                          setPullRequestBody(null)
+                          startChatStream(content, newMessages, snippets, {
+                            pulls,
+                          })
+                          setPrValidationStatuses([])
+                        } else {
+                          startChatStream(content, newMessages, snippets, {
+                            pulls,
+                          })
+                        }
+                      }}
+                      commitToPR={commitToPR}
+                      setSuggestedChanges={(suggestedChanges) => {
+                        setOriginalSuggestedChanges(suggestedChanges)
+                        setSuggestedChanges(suggestedChanges)
+                      }}
+                      onValidatePR={(pr) => validatePr(pr, index)}
+                      fixPrValidationErrors={() => {
+                        const currentPrValidationStatuses =
+                          messages[index]!.annotations!.prValidationStatuses
+                        if (currentPrValidationStatuses) {
+                          fixPrValidationErrors(currentPrValidationStatuses)
+                        }
+                      }}
+                    />
+                  ))
                   : messagesId.length > 0 && (
-                      <div className="space-y-4">
-                        <Skeleton className="h-12 ml-32 rounded-md" />
-                        <Skeleton className="h-12 mr-32 rounded-md" />
-                        <Skeleton className="h-12 ml-64 rounded-md" />
-                        <Skeleton className="h-12 mr-64 rounded-md" />
-                      </div>
-                    )}
+                    <div className="space-y-4">
+                      <Skeleton className="h-12 ml-32 rounded-md" />
+                      <Skeleton className="h-12 mr-32 rounded-md" />
+                      <Skeleton className="h-12 ml-64 rounded-md" />
+                      <Skeleton className="h-12 mr-64 rounded-md" />
+                    </div>
+                  )}
                 {isLoading && (
                   <div className="flex justify-around w-full py-2">
                     <PulsingLoader size={1.5} />
@@ -1306,33 +1293,33 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
                                   </Button>
                                 )}
                                 {// loop through all pull requests
-                                userMentionedPullRequests?.map((pr, index) => {
-                                  // dont show current selected pr, unless we are creating a pr rn
-                                  if (
-                                    pr.number !==
+                                  userMentionedPullRequests?.map((pr, index) => {
+                                    // dont show current selected pr, unless we are creating a pr rn
+                                    if (
+                                      pr.number !==
                                       userMentionedPullRequest?.number ||
-                                    !commitToPR
-                                  ) {
-                                    return (
-                                      <Button
-                                        className="w-full p-2 px-4"
-                                        variant="secondary"
-                                        disabled={isLoading}
-                                        onClick={() => {
-                                          setCommitToPR(true)
-                                          setUserMentionedPullRequest(pr)
-                                          setCommitToPRIsOpen(false)
-                                        }}
-                                        key={index}
-                                      >
-                                        <FaCodeCommit
-                                          style={{ display: 'inline' }}
-                                        />
-                                        &nbsp;&nbsp;Commit to PR #{pr.number}
-                                      </Button>
-                                    )
-                                  }
-                                })}
+                                      !commitToPR
+                                    ) {
+                                      return (
+                                        <Button
+                                          className="w-full p-2 px-4"
+                                          variant="secondary"
+                                          disabled={isLoading}
+                                          onClick={() => {
+                                            setCommitToPR(true)
+                                            setUserMentionedPullRequest(pr)
+                                            setCommitToPRIsOpen(false)
+                                          }}
+                                          key={index}
+                                        >
+                                          <FaCodeCommit
+                                            style={{ display: 'inline' }}
+                                          />
+                                          &nbsp;&nbsp;Commit to PR #{pr.number}
+                                        </Button>
+                                      )
+                                    }
+                                  })}
                               </NavigationMenuContent>
                             </NavigationMenuItem>
                           </NavigationMenuList>
@@ -1419,15 +1406,14 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
                       {suggestedChanges.map((suggestion, index) => (
                         <div className="fit-content mb-6" key={index}>
                           <div
-                            className={`flex justify-between items-center w-full text-sm p-2 px-4 rounded-t-md ${
-                              suggestion.state === 'done'
+                            className={`flex justify-between items-center w-full text-sm p-2 px-4 rounded-t-md ${suggestion.state === 'done'
                                 ? 'bg-green-900'
                                 : suggestion.state === 'error'
                                   ? 'bg-red-900'
                                   : suggestion.state === 'pending'
                                     ? 'bg-zinc-800'
                                     : 'bg-yellow-800'
-                            }`}
+                              }`}
                           >
                             <code>
                               {suggestion.filePath}{' '}
@@ -1495,217 +1481,217 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
                       )}
                       {(codeSuggestionsState == 'validating' ||
                         codeSuggestionsState == 'creating') && (
-                        <>
-                          {!(commitToPR && userMentionedPullRequest) && (
-                            <>
-                              <Input
-                                value={pullRequestTitle || ''}
-                                onChange={(e) =>
-                                  setPullRequestTitle(e.target.value)
-                                }
-                                placeholder="Pull Request Title"
-                                className="w-full mb-4 text-zinc-300"
-                                disabled={
-                                  pullRequestTitle == null ||
-                                  isProcessingSuggestedChanges
-                                }
-                              />
-                              <Textarea
-                                value={pullRequestBody || ''}
-                                onChange={(e) =>
-                                  setPullRequestBody(e.target.value)
-                                }
-                                placeholder="Pull Request Body"
-                                className="w-full mb-4 text-zinc-300"
-                                disabled={
-                                  pullRequestTitle == null ||
-                                  isProcessingSuggestedChanges
-                                }
-                                rows={8}
-                              />
-                            </>
-                          )}
-
-                          {commitToPR && userMentionedPullRequest ? (
-                            <div className="flex grow items-center mb-4">
-                              {`You are commiting to ${userMentionedPullRequest.branch} with the following commit message:`}
-                            </div>
-                          ) : (
-                            <div className="flex grow items-center mb-4">
-                              <Input
-                                className="flex items-center w-[600px]"
-                                value={baseBranch || ''}
-                                onChange={(e) => setBaseBranch(e.target.value)}
-                                placeholder="Base Branch"
-                                style={{
-                                  opacity: isProcessingSuggestedChanges
-                                    ? 0.5
-                                    : 1,
-                                }}
-                              />
-                              <FaArrowLeft className="mx-4" />
-                              <Input
-                                className="flex items-center w-[600px]"
-                                value={featureBranch || ''}
-                                onChange={(e) =>
-                                  setFeatureBranch(e.target.value)
-                                }
-                                placeholder="Feature Branch"
-                                style={{
-                                  opacity: isProcessingSuggestedChanges
-                                    ? 0.5
-                                    : 1,
-                                }}
-                              />
-                            </div>
-                          )}
-                          {commitToPR && userMentionedPullRequest ? (
-                            <div className="flex grow items-center mb-4">
-                              <Input
-                                className="flex items-center w-[600px]"
-                                value={pullRequestTitle || ''}
-                                onChange={(e) =>
-                                  setPullRequestTitle(e.target.value)
-                                }
-                                placeholder="Commit message"
-                                style={{
-                                  opacity: isProcessingSuggestedChanges
-                                    ? 0.5
-                                    : 1,
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <></>
-                          )}
-                          {!suggestedChanges.every(
-                            (suggestion) => suggestion.state == 'done'
-                          ) &&
-                            !isProcessingSuggestedChanges && (
-                              <Alert className="mb-4 bg-yellow-900">
-                                <FaExclamationTriangle className="h-4 w-4" />
-                                <AlertTitle>Warning</AlertTitle>
-                                <AlertDescription>
-                                  Some patches failed to validate, so you may
-                                  get some unexpected changes. You can try to
-                                  manually create a PR with the proposed
-                                  changes. If you think this is an error, please
-                                  to report this to us.
-                                </AlertDescription>
-                              </Alert>
-                            )}
-                          <Button
-                            className="mt-0 bg-blue-900 text-white hover:bg-blue-800"
-                            onClick={async () => {
-                              setIsCreatingPullRequest(true)
-                              setCodeSuggestionsState('creating')
-                              const file_changes = suggestedChanges.reduce(
-                                (
-                                  acc: Record<string, string>,
-                                  suggestion: CodeSuggestion
-                                ) => {
-                                  acc[suggestion.filePath] = suggestion.newCode
-                                  return acc
-                                },
-                                {}
-                              )
-                              try {
-                                let response: Response | undefined = undefined
-                                console.log('commit topr', commitToPR)
-                                if (commitToPR && userMentionedPullRequest) {
-                                  response = await authorizedFetch(
-                                    `/commit_to_pull`,
-                                    {
-                                      file_changes: file_changes,
-                                      pr_number: String(
-                                        userMentionedPullRequest?.number
-                                      ),
-                                      base_branch: baseBranch,
-                                      commit_message: pullRequestTitle,
-                                    }
-                                  )
-                                } else {
-                                  response = await authorizedFetch(
-                                    `/backend/create_pull`,
-                                    {
-                                      file_changes: file_changes,
-                                      branch:
-                                        'sweep-chat-patch-' +
-                                        new Date()
-                                          .toISOString()
-                                          .split('T')[0], // use ai for better branch name, title, and body later
-                                      base_branch: baseBranch,
-                                      title: pullRequestTitle,
-                                      body:
-                                        pullRequestBody +
-                                        `\n\nSuggested changes from Sweep Chat by @${session?.user?.username}. Continue chatting at ${window.location.origin}/c/${messagesId}.`,
-                                    }
-                                  )
-                                }
-
-                                const data = await response.json()
-                                const {
-                                  pull_request: pullRequest,
-                                  new_branch: branch,
-                                } = data
-                                pullRequest.branch = branch
-                                console.log('pullrequest', pullRequest)
-                                setPullRequest(pullRequest)
-                                setUserMentionedPullRequest(pullRequest)
-                                let newPulls = userMentionedPullRequests
-                                  ? [...userMentionedPullRequests]
-                                  : []
-
-                                newPulls.forEach((pull) => {
-                                  if (!isPullRequestEqual(pull, pullRequest)) {
-                                    newPulls.push(pullRequest)
+                          <>
+                            {!(commitToPR && userMentionedPullRequest) && (
+                              <>
+                                <Input
+                                  value={pullRequestTitle || ''}
+                                  onChange={(e) =>
+                                    setPullRequestTitle(e.target.value)
                                   }
-                                })
+                                  placeholder="Pull Request Title"
+                                  className="w-full mb-4 text-zinc-300"
+                                  disabled={
+                                    pullRequestTitle == null ||
+                                    isProcessingSuggestedChanges
+                                  }
+                                />
+                                <Textarea
+                                  value={pullRequestBody || ''}
+                                  onChange={(e) =>
+                                    setPullRequestBody(e.target.value)
+                                  }
+                                  placeholder="Pull Request Body"
+                                  className="w-full mb-4 text-zinc-300"
+                                  disabled={
+                                    pullRequestTitle == null ||
+                                    isProcessingSuggestedChanges
+                                  }
+                                  rows={8}
+                                />
+                              </>
+                            )}
 
-                                setUserMentionedPullRequests(newPulls)
-
-                                // for commits, show a different message
-                                const newMessages: Message[] = [
-                                  ...messages,
-                                  {
-                                    content: `Pull request created: [https://github.com/${repoName}/pull/${pullRequest.number}](https://github.com/${repoName}/pull/${pullRequest.number})`,
-                                    role: 'assistant',
-                                    annotations: {
-                                      pulls: [pullRequest],
-                                    },
+                            {commitToPR && userMentionedPullRequest ? (
+                              <div className="flex grow items-center mb-4">
+                                {`You are commiting to ${userMentionedPullRequest.branch} with the following commit message:`}
+                              </div>
+                            ) : (
+                              <div className="flex grow items-center mb-4">
+                                <Input
+                                  className="flex items-center w-[600px]"
+                                  value={baseBranch || ''}
+                                  onChange={(e) => setBaseBranch(e.target.value)}
+                                  placeholder="Base Branch"
+                                  style={{
+                                    opacity: isProcessingSuggestedChanges
+                                      ? 0.5
+                                      : 1,
+                                  }}
+                                />
+                                <FaArrowLeft className="mx-4" />
+                                <Input
+                                  className="flex items-center w-[600px]"
+                                  value={featureBranch || ''}
+                                  onChange={(e) =>
+                                    setFeatureBranch(e.target.value)
+                                  }
+                                  placeholder="Feature Branch"
+                                  style={{
+                                    opacity: isProcessingSuggestedChanges
+                                      ? 0.5
+                                      : 1,
+                                  }}
+                                />
+                              </div>
+                            )}
+                            {commitToPR && userMentionedPullRequest ? (
+                              <div className="flex grow items-center mb-4">
+                                <Input
+                                  className="flex items-center w-[600px]"
+                                  value={pullRequestTitle || ''}
+                                  onChange={(e) =>
+                                    setPullRequestTitle(e.target.value)
+                                  }
+                                  placeholder="Commit message"
+                                  style={{
+                                    opacity: isProcessingSuggestedChanges
+                                      ? 0.5
+                                      : 1,
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <></>
+                            )}
+                            {!suggestedChanges.every(
+                              (suggestion) => suggestion.state == 'done'
+                            ) &&
+                              !isProcessingSuggestedChanges && (
+                                <Alert className="mb-4 bg-yellow-900">
+                                  <FaExclamationTriangle className="h-4 w-4" />
+                                  <AlertTitle>Warning</AlertTitle>
+                                  <AlertDescription>
+                                    Some patches failed to validate, so you may
+                                    get some unexpected changes. You can try to
+                                    manually create a PR with the proposed
+                                    changes. If you think this is an error, please
+                                    to report this to us.
+                                  </AlertDescription>
+                                </Alert>
+                              )}
+                            <Button
+                              className="mt-0 bg-blue-900 text-white hover:bg-blue-800"
+                              onClick={async () => {
+                                setIsCreatingPullRequest(true)
+                                setCodeSuggestionsState('creating')
+                                const file_changes = suggestedChanges.reduce(
+                                  (
+                                    acc: Record<string, string>,
+                                    suggestion: CodeSuggestion
+                                  ) => {
+                                    acc[suggestion.filePath] = suggestion.newCode
+                                    return acc
                                   },
-                                ]
-                                console.log(pullRequest)
-                                setPullRequest(pullRequest)
-                                setMessages(newMessages)
-                                setIsCreatingPullRequest(false)
-                                setOriginalSuggestedChanges([])
-                                setSuggestedChanges([])
+                                  {}
+                                )
+                                try {
+                                  let response: Response | undefined = undefined
+                                  console.log('commit topr', commitToPR)
+                                  if (commitToPR && userMentionedPullRequest) {
+                                    response = await authorizedFetch(
+                                      `/commit_to_pull`,
+                                      {
+                                        file_changes: file_changes,
+                                        pr_number: String(
+                                          userMentionedPullRequest?.number
+                                        ),
+                                        base_branch: baseBranch,
+                                        commit_message: pullRequestTitle,
+                                      }
+                                    )
+                                  } else {
+                                    response = await authorizedFetch(
+                                      `/backend/create_pull`,
+                                      {
+                                        file_changes: file_changes,
+                                        branch:
+                                          'sweep-chat-patch-' +
+                                          new Date()
+                                            .toISOString()
+                                            .split('T')[0], // use ai for better branch name, title, and body later
+                                        base_branch: baseBranch,
+                                        title: pullRequestTitle,
+                                        body:
+                                          pullRequestBody +
+                                          `\n\nSuggested changes from Sweep Chat by @${session?.user?.username}. Continue chatting at ${window.location.origin}/c/${messagesId}.`,
+                                      }
+                                    )
+                                  }
 
-                                validatePr(pullRequest, newMessages.length - 1)
-                              } catch (e) {
-                                setIsCreatingPullRequest(false)
-                                toast({
-                                  title: 'Error',
-                                  description: `An error occurred while creating the pull request: ${e}`,
-                                  variant: 'destructive',
-                                  duration: Infinity,
-                                })
+                                  const data = await response.json()
+                                  const {
+                                    pull_request: pullRequest,
+                                    new_branch: branch,
+                                  } = data
+                                  pullRequest.branch = branch
+                                  console.log('pullrequest', pullRequest)
+                                  setPullRequest(pullRequest)
+                                  setUserMentionedPullRequest(pullRequest)
+                                  let newPulls = userMentionedPullRequests
+                                    ? [...userMentionedPullRequests]
+                                    : []
+
+                                  newPulls.forEach((pull) => {
+                                    if (!isPullRequestEqual(pull, pullRequest)) {
+                                      newPulls.push(pullRequest)
+                                    }
+                                  })
+
+                                  setUserMentionedPullRequests(newPulls)
+
+                                  // for commits, show a different message
+                                  const newMessages: Message[] = [
+                                    ...messages,
+                                    {
+                                      content: `Pull request created: [https://github.com/${repoName}/pull/${pullRequest.number}](https://github.com/${repoName}/pull/${pullRequest.number})`,
+                                      role: 'assistant',
+                                      annotations: {
+                                        pulls: [pullRequest],
+                                      },
+                                    },
+                                  ]
+                                  console.log(pullRequest)
+                                  setPullRequest(pullRequest)
+                                  setMessages(newMessages)
+                                  setIsCreatingPullRequest(false)
+                                  setOriginalSuggestedChanges([])
+                                  setSuggestedChanges([])
+
+                                  validatePr(pullRequest, newMessages.length - 1)
+                                } catch (e) {
+                                  setIsCreatingPullRequest(false)
+                                  toast({
+                                    title: 'Error',
+                                    description: `An error occurred while creating the pull request: ${e}`,
+                                    variant: 'destructive',
+                                    duration: Infinity,
+                                  })
+                                }
+                              }}
+                              disabled={
+                                isCreatingPullRequest ||
+                                isProcessingSuggestedChanges ||
+                                !pullRequestTitle ||
+                                !pullRequestBody
                               }
-                            }}
-                            disabled={
-                              isCreatingPullRequest ||
-                              isProcessingSuggestedChanges ||
-                              !pullRequestTitle ||
-                              !pullRequestBody
-                            }
-                          >
-                            {commitToPR && userMentionedPullRequest
-                              ? `Commit to Pull Request #${userMentionedPullRequest?.number}`
-                              : 'Create Pull Request'}
-                          </Button>
-                        </>
-                      )}
+                            >
+                              {commitToPR && userMentionedPullRequest
+                                ? `Commit to Pull Request #${userMentionedPullRequest?.number}`
+                                : 'Create Pull Request'}
+                            </Button>
+                          </>
+                        )}
                     </div>
                   </div>
                 )}
@@ -1749,11 +1735,10 @@ function App({ defaultMessageId = '' }: { defaultMessageId?: string }) {
                       Share your chat session with a team member.
                     </p>
                     <Input
-                      value={`${
-                        typeof window !== 'undefined'
+                      value={`${typeof window !== 'undefined'
                           ? window.location.origin
                           : ''
-                      }/c/${messagesId}`}
+                        }/c/${messagesId}`}
                       onClick={() => {
                         navigator.clipboard.writeText(
                           `${window.location.origin}/c/${messagesId}`

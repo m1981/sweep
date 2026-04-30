@@ -1,93 +1,34 @@
 import { AuthOptions } from 'next-auth'
-import GitHubProvider from 'next-auth/providers/github'
-import { refreshToken } from '@octokit/oauth-methods'
-import { Octokit } from 'octokit'
-import { cache } from 'react'
-
-const getUserData = cache(async (accessToken: string, sub: string) => {
-  const octokit = new Octokit({
-    auth: accessToken,
-  })
-  const response = await octokit.request('GET /user/{id}', {
-    id: sub,
-  })
-  return response.data
-})
+import CredentialsProvider from 'next-auth/providers/credentials'
 
 const authOptions: AuthOptions = {
   providers: [
-    GitHubProvider({
-      clientId: process.env.GITHUB_ID || '',
-      clientSecret: process.env.GITHUB_SECRET || '',
-    }),
+    CredentialsProvider({
+      name: 'Local Dev',
+      credentials: {},
+      async authorize() {
+        // Always return a mock local user
+        return {
+          id: '1',
+          name: 'Local Developer',
+          email: 'local@localhost',
+          image: 'https://github.com/ghost.png',
+        }
+      }
+    })
   ],
-  debug: process.env.NODE_ENV === 'development',
   callbacks: {
-    async session({ session, token }: any) {
-      const { sub } = token
-      const data = await getUserData(token.accessToken, sub)
+    async session({ session, token }) {
       session.user = {
-        name: data.name,
-        username: data.login,
-        image: data.avatar_url,
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        expires_at: token.expires_at,
+        name: 'Local Developer',
+        username: 'localdev',
+        image: 'https://github.com/ghost.png',
+        accessToken: 'mock-local-token', // Fake token for backend
+        refreshToken: 'mock-local-token',
+        expires_at: Date.now() + 1000 * 60 * 60 * 24,
       }
       return session
-    },
-    async signIn({ user, account, profile }: any) {
-      if (account.provider === 'github') {
-        user.username = profile.login
-      }
-      return true
-    },
-    async jwt({ token, account }) {
-      const hasExpired = token.expires_at
-        ? Date.now() >= (token.expires_at as number) * 1000
-        : false
-      if (account && !hasExpired) {
-        return {
-          ...token,
-          accessToken: account?.access_token,
-          refreshToken: account?.refresh_token,
-          expires_at: account?.expires_at,
-        }
-      }
-      if (hasExpired) {
-        const { data, authentication } = await refreshToken({
-          clientType: 'github-app',
-          clientId: process.env.GITHUB_ID || '',
-          clientSecret: process.env.GITHUB_SECRET || '',
-          refreshToken: token.refreshToken as string,
-        })
-        token.accessToken = data.access_token
-        token.refreshToken = data.refresh_token
-        token.expires_at = data.expires_in
-        return {
-          ...token,
-          accessToken: data.access_token,
-          refreshToken: data.refresh_token,
-          expires_at: Date.now() + 1000 * 60 * 60 * 8,
-        }
-      }
-      return token
-    },
-  },
-}
-
-declare module 'next-auth' {
-  interface Session {
-    user: {
-      email: string
-      name: string
-      username: string
-      image: string
-      accessToken: string
-      refreshToken: string
-      expires_at: number
     }
   }
 }
-
 export default authOptions
