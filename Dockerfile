@@ -1,49 +1,73 @@
-FROM python:3.10-slim as base
+FROM --platform=linux/arm64 python:3.10-slim AS base
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 ENV WORKERS=3
 ENV PORT=${PORT:-8080}
 
 WORKDIR /app
 
+# ── System deps ────────────────────────────────────────────────────────────────
+# No changes needed here — all packages have arm64 variants in Debian repos
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl redis-server npm build-essential pkg-config libssl-dev \
-       cmake pkg-config libicu-dev zlib1g-dev libcurl4-openssl-dev libssl-dev ruby-dev \
+    && apt-get install -y --no-install-recommends \
+       git curl redis-server npm build-essential pkg-config \
+       libssl-dev cmake libicu-dev zlib1g-dev \
+       libcurl4-openssl-dev ruby-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 RUN gem install github-linguist
 
-RUN curl -LO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb && \
-    dpkg -i ripgrep_13.0.0_amd64.deb && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 
+# ── ripgrep ────────────────────────────────────────────────────────────────────
+# FIXED: The original used an amd64 .deb — that binary will SIGILL on M2.
+# Strategy: install Rust, then compile ripgrep from source for arm64.
+# (Compiling from source also removes the redundant git-clone block that
+#  existed alongside the .deb install in the original.)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN git clone https://github.com/BurntSushi/ripgrep
-RUN cd ripgrep && \
-    cargo build --release && \
-    ./target/release/rg --version
 
-ENV VIRTUAL_ENV=/usr/local
-RUN curl -sSL https://astral.sh/uv/install.sh -o /install.sh && chmod 755 /install.sh && /install.sh && rm /install.sh
+RUN cargo install ripgrep --locked \
+    && rg --version
 
+# ── uv (Python package manager) ────────────────────────────────────────────────
+# The official install script detects the arch automatically — no change needed.
+RUN curl -sSL https://astral.sh/uv/install.sh -o /install.sh \
+    && chmod 755 /install.sh \
+    && /install.sh \
+    && rm /install.sh
+
+# ── Python dependencies ────────────────────────────────────────────────────────
 COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache -r requirements.txt
+# ── Node / JS tooling ──────────────────────────────────────────────────────────
+# FIXED: npm on arm64 Debian ships an old Node. Pin a modern LTS via NodeSource
+# so that native addons (e.g. those pulled by eslint plugins) compile correctly.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g prettier@2.0.4 @types/react @types/react-dom typescript eslint@8.57.0 
-RUN npm install react react-dom
-RUN npm install @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-import eslint-plugin-react --save-dev
+RUN npm install -g prettier@2.0.4 typescript eslint@8.57.0 \
+    && npm install react react-dom @types/react @types/react-dom \
+    && npm install --save-dev \
+       @typescript-eslint/parser \
+       @typescript-eslint/eslint-plugin \
+       eslint-plugin-import \
+       eslint-plugin-react
 
-COPY sweepai /app/sweepai
-COPY tests /app/tests
-ENV PYTHONPATH=.
+# ── Application code ───────────────────────────────────────────────────────────
+COPY sweepai  /app/sweepai
+COPY tests    /app/tests
 COPY redis.conf /app/redis.conf
-COPY bin /app/bin
+COPY bin      /app/bin
+
+ENV PYTHONPATH=.
 RUN chmod a+x /app/bin/startup.sh
 
 EXPOSE 8080
-CMD ["bash", "-c", "chmod a+x /app/bin/startup.sh && /app/bin/startup.sh"]
+CMD ["bash", "-c", "/app/bin/startup.sh"]
 
 LABEL org.opencontainers.image.description="Backend for Sweep, an AI-powered junior developer"
 LABEL org.opencontainers.image.source="https://github.com/sweepai/sweep"
