@@ -14,6 +14,8 @@ PORT        ?= 8080
 PYTHON      ?= 3.10
 REGISTRY    ?= ghcr.io/sweepai
 
+DEV_COMPOSE := docker-compose.dev.yml
+
 # uv platform triples — must match Debian glibc (python:3.10-slim base)
 UV_PLATFORM_AMD64 := x86_64-manylinux_2_28
 UV_PLATFORM_ARM64 := aarch64-manylinux_2_28
@@ -44,6 +46,7 @@ info: ## Show resolved build config
 	@printf "  $(YELLOW)%-18s$(RESET) %s\n" "Lockfile"    "$(LOCKFILE)"
 	@printf "  $(YELLOW)%-18s$(RESET) %s\n" "Image"       "$(IMAGE):$(TAG)"
 	@printf "  $(YELLOW)%-18s$(RESET) %s\n" "Port"        "$(PORT)"
+	@printf "  $(YELLOW)%-18s$(RESET) %s\n" "Dev compose" "$(DEV_COMPOSE)"
 	@echo ""
 
 ##@ Dependencies
@@ -96,6 +99,57 @@ lock-check: ## Verify lockfiles are in sync with pyproject.toml (CI use)
 	@diff requirements.arm64.txt /tmp/req.arm64.check.txt > /dev/null || \
 		(echo "$(RED)✗ requirements.arm64.txt is out of sync — run: make lock$(RESET)" && exit 1)
 	@echo "$(GREEN)✓ Lockfiles are up to date$(RESET)"
+
+##@ Docker — development (live-reload, mounted source)
+.PHONY: dev-build
+dev-build: ## Build the dev image (arm64, no cache bust)
+	@echo "$(BLUE)Building dev image for $(PLATFORM)...$(RESET)"
+	docker compose -f $(DEV_COMPOSE) build \
+		--build-arg LOCKFILE=$(LOCKFILE)
+	@echo "$(GREEN)✓ Dev image ready$(RESET)"
+
+.PHONY: dev-rebuild
+dev-rebuild: ## Force-rebuild the dev image from scratch (no layer cache)
+	@echo "$(BLUE)Rebuilding dev image (no cache)...$(RESET)"
+	docker compose -f $(DEV_COMPOSE) build \
+		--no-cache \
+		--build-arg LOCKFILE=$(LOCKFILE)
+	@echo "$(GREEN)✓ Dev image rebuilt$(RESET)"
+
+.PHONY: dev-up
+dev-up: ## Start dev container (builds if image missing), tail logs
+	@echo "$(BLUE)Starting dev stack...$(RESET)"
+	docker compose -f $(DEV_COMPOSE) up --build
+
+.PHONY: dev-up-d
+dev-up-d: ## Start dev container in the background (detached)
+	@echo "$(BLUE)Starting dev stack (detached)...$(RESET)"
+	docker compose -f $(DEV_COMPOSE) up --build -d
+	@echo "$(GREEN)✓ Running at http://localhost:$(PORT)$(RESET)"
+	@echo "  Logs: make dev-logs   Shell: make dev-shell"
+
+.PHONY: dev-down
+dev-down: ## Stop and remove dev container + network (keeps named volumes)
+	docker compose -f $(DEV_COMPOSE) down
+	@echo "$(GREEN)✓ Dev stack stopped$(RESET)"
+
+.PHONY: dev-clean
+dev-clean: ## Stop dev stack AND remove named volumes (fresh-slate reset)
+	docker compose -f $(DEV_COMPOSE) down -v
+	@echo "$(GREEN)✓ Dev stack and volumes removed$(RESET)"
+
+.PHONY: dev-logs
+dev-logs: ## Tail logs from the dev container
+	docker compose -f $(DEV_COMPOSE) logs -f
+
+.PHONY: dev-shell
+dev-shell: ## Open an interactive bash shell in the running dev container
+	docker compose -f $(DEV_COMPOSE) exec hosted bash
+
+.PHONY: dev-restart
+dev-restart: ## Restart the dev container without rebuilding
+	docker compose -f $(DEV_COMPOSE) restart hosted
+	@echo "$(GREEN)✓ Dev container restarted$(RESET)"
 
 ##@ Docker — local (native arch)
 .PHONY: build
@@ -172,6 +226,11 @@ test: ## Run pytest inside the container
 		--platform $(PLATFORM) \
 		--env-file .env \
 		$(IMAGE):$(TAG) \
+		python -m pytest tests/ -v
+
+.PHONY: dev-test
+dev-test: ## Run pytest inside the RUNNING dev container (uses mounted source)
+	docker compose -f $(DEV_COMPOSE) exec hosted \
 		python -m pytest tests/ -v
 
 .PHONY: lint
