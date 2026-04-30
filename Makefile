@@ -14,6 +14,10 @@ PORT        ?= 8080
 PYTHON      ?= 3.10
 REGISTRY    ?= ghcr.io/sweepai
 
+# uv platform triples — must match Debian glibc (python:3.10-slim base)
+UV_PLATFORM_AMD64 := x86_64-manylinux_2_28
+UV_PLATFORM_ARM64 := aarch64-manylinux_2_28
+
 # Detect host arch; used to choose the right lockfile
 HOST_ARCH   := $(shell uname -m)
 ifeq ($(HOST_ARCH),arm64)
@@ -52,12 +56,12 @@ lock: ## Compile lockfiles for BOTH platforms (requires uv)
 	@echo "$(BLUE)Compiling amd64 lockfile...$(RESET)"
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/x86_64 \
+		--python-platform $(UV_PLATFORM_AMD64) \
 		-o requirements.txt
 	@echo "$(BLUE)Compiling arm64 lockfile...$(RESET)"
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/aarch64 \
+		--python-platform $(UV_PLATFORM_ARM64) \
 		-o requirements.arm64.txt
 	@echo "$(GREEN)✓ Both lockfiles updated$(RESET)"
 
@@ -65,14 +69,14 @@ lock: ## Compile lockfiles for BOTH platforms (requires uv)
 lock-amd64: ## Compile amd64 lockfile only
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/x86_64 \
+		--python-platform $(UV_PLATFORM_AMD64) \
 		-o requirements.txt
 
 .PHONY: lock-arm64
 lock-arm64: ## Compile arm64 lockfile only (for M-series Macs)
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/aarch64 \
+		--python-platform $(UV_PLATFORM_ARM64) \
 		-o requirements.arm64.txt
 
 .PHONY: lock-check
@@ -80,14 +84,14 @@ lock-check: ## Verify lockfiles are in sync with pyproject.toml (CI use)
 	@echo "$(BLUE)Checking amd64 lockfile...$(RESET)"
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/x86_64 \
+		--python-platform $(UV_PLATFORM_AMD64) \
 		-o /tmp/req.check.txt
 	@diff requirements.txt /tmp/req.check.txt > /dev/null || \
 		(echo "$(RED)✗ requirements.txt is out of sync — run: make lock$(RESET)" && exit 1)
 	@echo "$(BLUE)Checking arm64 lockfile...$(RESET)"
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/aarch64 \
+		--python-platform $(UV_PLATFORM_ARM64) \
 		-o /tmp/req.arm64.check.txt
 	@diff requirements.arm64.txt /tmp/req.arm64.check.txt > /dev/null || \
 		(echo "$(RED)✗ requirements.arm64.txt is out of sync — run: make lock$(RESET)" && exit 1)
@@ -179,7 +183,7 @@ lint: ## Run ruff + pylint locally
 ts-check: ## Verify tree-sitter aarch64 wheels resolve correctly (dry-run)
 	uv pip compile pyproject.toml \
 		--python-version $(PYTHON) \
-		--python-platform linux/aarch64 \
+		--python-platform $(UV_PLATFORM_ARM64) \
 		--dry-run 2>&1 | grep tree-sitter
 
 ##@ Housekeeping

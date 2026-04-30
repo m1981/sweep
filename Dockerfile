@@ -7,6 +7,9 @@ ENV PORT=${PORT:-8080}
 
 WORKDIR /app
 
+# Injected by Makefile: requirements.txt (amd64) or requirements.arm64.txt (arm64)
+ARG LOCKFILE=requirements.arm64.txt
+
 # ── System deps ────────────────────────────────────────────────────────────────
 # No changes needed here — all packages have arm64 variants in Debian repos
 RUN apt-get update \
@@ -17,6 +20,8 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# ── github-linguist (gem) ──────────────────────────────────────────────────────
+# Unchanged — gem install resolves native extensions for the host arch
 RUN gem install github-linguist
 
 # ── ripgrep ────────────────────────────────────────────────────────────────────
@@ -39,8 +44,20 @@ RUN curl -sSL https://astral.sh/uv/install.sh -o /install.sh \
     && rm /install.sh
 
 # ── Python dependencies ────────────────────────────────────────────────────────
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.arm64.txt ./
+RUN pip install --no-cache-dir -r ${LOCKFILE}
+
+# Sanity-check: verify aarch64 wheels resolved correctly (fails fast if not)
+RUN python - <<'EOF'
+import tree_sitter_python, tree_sitter_javascript
+from tree_sitter import Language, Parser
+lang = Language(tree_sitter_python.language())
+p = Parser()
+p.language = lang
+tree = p.parse(b"x = 1")
+assert tree.root_node.type == "module", "tree-sitter self-test failed"
+print("tree-sitter aarch64 OK")
+EOF
 
 # ── Node / JS tooling ──────────────────────────────────────────────────────────
 # FIXED: npm on arm64 Debian ships an old Node. Pin a modern LTS via NodeSource
