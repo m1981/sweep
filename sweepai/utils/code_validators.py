@@ -17,7 +17,7 @@ from pylint.lint import Run
 from pylint.reporters.text import TextReporter
 from loguru import logger
 from tree_sitter import Node, Parser, Language
-from tree_sitter_languages import get_parser as tree_sitter_get_parser
+from sweepai.utils.tree_sitter_shim import get_language, get_parser
 import tree_sitter_python
 import tree_sitter_javascript
 
