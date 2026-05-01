@@ -82,24 +82,6 @@ lock-arm64: ## Compile arm64 lockfile only (for M-series Macs)
 		--python-platform $(UV_PLATFORM_ARM64) \
 		-o requirements.arm64.txt
 
-.PHONY: lock-check
-lock-check: ## Verify lockfiles are in sync with pyproject.toml (CI use)
-	@echo "$(BLUE)Checking amd64 lockfile...$(RESET)"
-	uv pip compile pyproject.toml \
-		--python-version $(PYTHON) \
-		--python-platform $(UV_PLATFORM_AMD64) \
-		-o /tmp/req.check.txt
-	@diff requirements.txt /tmp/req.check.txt > /dev/null || \
-		(echo "$(RED)✗ requirements.txt is out of sync — run: make lock$(RESET)" && exit 1)
-	@echo "$(BLUE)Checking arm64 lockfile...$(RESET)"
-	uv pip compile pyproject.toml \
-		--python-version $(PYTHON) \
-		--python-platform $(UV_PLATFORM_ARM64) \
-		-o /tmp/req.arm64.check.txt
-	@diff requirements.arm64.txt /tmp/req.arm64.check.txt > /dev/null || \
-		(echo "$(RED)✗ requirements.arm64.txt is out of sync — run: make lock$(RESET)" && exit 1)
-	@echo "$(GREEN)✓ Lockfiles are up to date$(RESET)"
-
 ##@ Docker — development (live-reload, mounted source)
 .PHONY: dev-build
 dev-build: ## Build the dev image (arm64, no cache bust)
@@ -121,36 +103,6 @@ dev-up: ## Start dev container (builds if image missing), tail logs
 	@echo "$(BLUE)Starting dev stack...$(RESET)"
 	docker compose -f $(DEV_COMPOSE) up --build
 
-.PHONY: dev-up-d
-dev-up-d: ## Start dev container in the background (detached)
-	@echo "$(BLUE)Starting dev stack (detached)...$(RESET)"
-	docker compose -f $(DEV_COMPOSE) up --build -d
-	@echo "$(GREEN)✓ Running at http://localhost:$(PORT)$(RESET)"
-	@echo "  Logs: make dev-logs   Shell: make dev-shell"
-
-.PHONY: dev-down
-dev-down: ## Stop and remove dev container + network (keeps named volumes)
-	docker compose -f $(DEV_COMPOSE) down
-	@echo "$(GREEN)✓ Dev stack stopped$(RESET)"
-
-.PHONY: dev-clean
-dev-clean: ## Stop dev stack AND remove named volumes (fresh-slate reset)
-	docker compose -f $(DEV_COMPOSE) down -v
-	@echo "$(GREEN)✓ Dev stack and volumes removed$(RESET)"
-
-.PHONY: dev-logs
-dev-logs: ## Tail logs from the dev container
-	docker compose -f $(DEV_COMPOSE) logs -f
-
-.PHONY: dev-shell
-dev-shell: ## Open an interactive bash shell in the running dev container
-	docker compose -f $(DEV_COMPOSE) exec hosted bash
-
-.PHONY: dev-restart
-dev-restart: ## Restart the dev container without rebuilding
-	docker compose -f $(DEV_COMPOSE) restart hosted
-	@echo "$(GREEN)✓ Dev container restarted$(RESET)"
-
 ##@ Docker — local (native arch)
 .PHONY: build
 build: ## Build image for your current machine arch (auto-detected)
@@ -163,7 +115,7 @@ build: ## Build image for your current machine arch (auto-detected)
 
 .PHONY: run
 run: ## Run the container locally (detached)
-	.venv/bin/uvicorn sweepai.api:app --reload --port 8080 --env-file .en
+	.venv/bin/uvicorn sweepai.api:app --reload --port 8080
 
 ##@ Docker — explicit arch
 .PHONY: build-arm64
