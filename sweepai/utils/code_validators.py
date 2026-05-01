@@ -20,6 +20,16 @@ from tree_sitter import Node, Parser, Language
 import tree_sitter_python
 import tree_sitter_javascript
 import tree_sitter_typescript
+import tree_sitter_html
+import tree_sitter_make
+import tree_sitter_dockerfile
+import tree_sitter_markdown
+import tree_sitter_yaml
+import tree_sitter_sql
+import tree_sitter_bash
+import tree_sitter_css
+import tree_sitter_json
+import tree_sitter_tom
 
 from sweepai.core.entities import Snippet
 from sweepai.logn.cache import file_cache
