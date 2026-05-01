@@ -73,45 +73,76 @@ def normalize_l2(x):
         norm = np.linalg.norm(x, 2, axis=1, keepdims=True)
         return np.where(norm == 0, x, x / norm)
 
-def batch_by_token_count_for_voyage(
+OPENAI_MAX_TOKENS_PER_REQUEST = 300_000
+OPENAI_MAX_BATCH_SIZE = 2048
+VOYAGE_MAX_TOKENS_PER_REQUEST = 120_000
+VOYAGE_MAX_BATCH_SIZE = 128
+
+
+def batch_by_token_count(
     texts: list[str],
-    max_tokens: int = 120_000,
-    max_length: int = 128,
+    max_tokens: int,
+    max_batch_size: int,
 ) -> list[list[str]]:
     """
-    This function splits the texts into batches based on the token count.
-    Max token count for Voyage is 120k and max batch length count is 128.
+    Split texts into batches respecting both total token limit and max batch size.
+    Replaces naive fixed-size batching in embed_text_array.
     """
-    client = voyageai.Client()
-    batches = []
-    batch = []
+    batches: list[list[str]] = []
+    batch: list[str] = []
     token_count = 0
+
     for text in texts:
-        text_token_count = client.count_tokens([text])
-        if token_count + text_token_count > max_tokens * 0.95 or len(batch) >= max_length:
+        text_token_count = tiktoken_client.count(text)
+        if batch and (
+            token_count + text_token_count > max_tokens * 0.90  # 10% safety margin
+            or len(batch) >= max_batch_size
+        ):
             batches.append(batch)
-            batch = [text]  # Start the new batch with the current text
-            token_count = text_token_count  # Reset token count for the new batch
+            batch = [text]
+            token_count = text_token_count
         else:
             batch.append(text)
             token_count += text_token_count
+
     if batch:
         batches.append(batch)
-    del client
+
+    logger.debug(
+        f"batch_by_token_count: {len(texts)} texts → {len(batches)} batches "
+        f"(max_tokens={max_tokens}, max_batch_size={max_batch_size})"
+    )
     return batches
 
-# lru_cache(maxsize=20)
-# @redis_cache()
+
 def embed_text_array(texts: list[str]) -> list[np.ndarray]:
-    embeddings = []
     texts = [text if text else " " for text in texts]
-    batches = [texts[i : i + BATCH_SIZE] for i in range(0, len(texts), BATCH_SIZE)]
+
+    # Pick limits based on active provider — mirrors logic in openai_call_embedding_router
+    if VOYAGE_API_USE_AWS or VOYAGE_API_KEY:
+        batches = batch_by_token_count(
+            texts,
+            max_tokens=VOYAGE_MAX_TOKENS_PER_REQUEST,
+            max_batch_size=VOYAGE_MAX_BATCH_SIZE,
+        )
+        provider = "voyage-aws" if VOYAGE_API_USE_AWS else "voyage"
+    else:
+        batches = batch_by_token_count(
+            texts,
+            max_tokens=OPENAI_MAX_TOKENS_PER_REQUEST,
+            max_batch_size=OPENAI_MAX_BATCH_SIZE,
+        )
+        provider = "openai"
+
+    logger.debug(
+        f"embed_text_array: {len(texts)} texts → {len(batches)} token-aware batches "
+        f"using {provider}"
+    )
+
     workers = min(max(1, multiprocessing.cpu_count() // 4), 1)
     with Timer() as timer:
         if workers > 1 and len(batches) > 1:
-            with multiprocessing.Pool(
-                processes=workers
-            ) as pool:
+            with multiprocessing.Pool(processes=workers) as pool:
                 embeddings = list(
                     tqdm(
                         pool.imap(openai_with_expo_backoff, batches),
@@ -120,9 +151,13 @@ def embed_text_array(texts: list[str]) -> list[np.ndarray]:
                     )
                 )
         else:
-            embeddings = [openai_with_expo_backoff(batch) for batch in tqdm(batches, desc="openai embedding")]
+            embeddings = [
+                openai_with_expo_backoff(batch)
+                for batch in tqdm(batches, desc="openai embedding")
+            ]
     logger.info(f"Embedding docs took {timer.time_elapsed:.2f} seconds")
     return embeddings
+
 
 
 # @redis_cache()
@@ -173,25 +208,64 @@ def openai_call_embedding_router(batch: list[str], input_type: str="document"): 
         # save results to redis
         return normalized_dim
 
-def openai_call_embedding(batch: list[str], input_type: str="document"):
-    # Backoff on batch size by splitting the batch in half.
+def openai_call_embedding(batch: list[str], input_type: str = "document"):
+    logger.debug(f"openai_call_embedding called: batch_size={len(batch)}, input_type={input_type}")
     try:
-        return openai_call_embedding_router(batch, input_type)
-    except (voyageai_error.InvalidRequestError, ClientError) as e: # full error is botocore.errorfactory.ModelError: but I can't find it
+        result = openai_call_embedding_router(batch, input_type)
+        if result is None:
+            logger.error("openai_call_embedding_router returned None unexpectedly")
+            raise ValueError("openai_call_embedding_router returned None")
+        logger.debug(f"openai_call_embedding_router success: shape={np.array(result).shape}")
+        return result
+    except (voyageai_error.InvalidRequestError, ClientError) as e:
         if len(batch) > 1 and "Please lower the number of tokens in the batch." in str(e):
-            logger.error(f"Token count exceeded for batch: {max([tiktoken_client.count(text) for text in batch])} retrying by splitting batch in half.")
+            logger.error(
+                f"Token batch too large, max_tokens={max([tiktoken_client.count(t) for t in batch])}, "
+                f"splitting batch of {len(batch)} in half"
+            )
             mid = len(batch) // 2
             left = openai_call_embedding(batch[:mid], input_type)
             right = openai_call_embedding(batch[mid:], input_type)
             return np.concatenate((left, right))
         else:
-            raise e
+            logger.error(f"Unrecoverable voyage/aws embedding error: {e}")
+            raise
     except openai.BadRequestError as e:
-        # In the future we can better handle this by averaging the embeddings of the split batch
-        if "maximum context length" in str(e):
-            logger.warning(f"Token count exceeded for batch: {max([tiktoken_client.count(text) for text in batch])} truncating down to 8192 tokens.")
-            batch = [tiktoken_client.truncate_string(text) for text in batch]
+        error_str = str(e)
+
+        # Phrases that indicate the batch is too large and should be split
+        BATCH_TOO_LARGE_PHRASES = (
+            "maximum context length",       # older openai message
+            "maximum input length",         # e.g. "Invalid 'input[81]': maximum input length is 8192 tokens."
+            "max 300000 tokens per request",# e.g. "Requested 346763 tokens, max 300000 tokens per request"
+            "max_tokens_per_request",       # error code variant
+            "tokens per request",           # catch-all for similar future variants
+        )
+
+        if len(batch) > 1 and any(phrase in error_str for phrase in BATCH_TOO_LARGE_PHRASES):
+            logger.warning(
+                f"Batch token limit exceeded for batch of {len(batch)} texts "
+                f"(total_tokens~={sum([tiktoken_client.count(t) for t in batch])}), "
+                f"splitting in half and retrying"
+            )
+            mid = len(batch) // 2
+            left = openai_call_embedding(batch[:mid], input_type)
+            right = openai_call_embedding(batch[mid:], input_type)
+            return np.concatenate((left, right))
+        elif len(batch) == 1 and any(phrase in error_str for phrase in BATCH_TOO_LARGE_PHRASES):
+            # Single item exceeds limit — truncate it
+            logger.warning(
+                f"Single item token limit exceeded "
+                f"(tokens={tiktoken_client.count(batch[0])}), truncating to 8192"
+            )
+            batch = [tiktoken_client.truncate_string(batch[0])]
             return openai_call_embedding(batch, input_type)
+        else:
+            logger.error(f"BadRequestError not related to token length: {e}")
+            raise
+
+
+
 
 
 @backoff.on_exception(
@@ -200,6 +274,8 @@ def openai_call_embedding(batch: list[str], input_type: str="document"):
     max_tries=5,
 )
 def openai_with_expo_backoff(batch: tuple[str]):
+    logger.debug(f"openai_with_expo_backoff called with batch size: {len(batch)}")
+
     # check cache first
     embeddings: list[np.ndarray | None] = [None] * len(batch)
     cache_keys = [hash_sha256(text) + CACHE_VERSION for text in batch]
@@ -212,41 +288,78 @@ def openai_with_expo_backoff(batch: tuple[str]):
     except Exception as e:
         logger.warning(f"Error reading embeddings from cache: {e}")
 
+    cached_count = sum(1 for e in embeddings if e is not None)
+    logger.debug(f"Cache hits: {cached_count}/{len(batch)}")
+
     # not stored in cache, call openai
-    batch = [
+    uncached_batch = [
         text for i, text in enumerate(batch) if embeddings[i] is None
-    ]  # remove all the cached values from the batch
-    if len(batch) == 0:
-        embeddings = np.array(embeddings)
-        return embeddings  # all embeddings are in cache
+    ]
+    if len(uncached_batch) == 0:
+        logger.debug("All embeddings served from cache, skipping API call")
+        return np.array(embeddings)
+
+    logger.debug(f"Calling openai_call_embedding for {len(uncached_batch)} uncached texts")
+
+    new_embeddings = None  # explicit init so we can detect failure
     try:
-        # make sure all token counts are within model params (max: 8192)
-        new_embeddings = openai_call_embedding(batch)
+        new_embeddings = openai_call_embedding(uncached_batch)
+        logger.debug(
+            f"openai_call_embedding returned type={type(new_embeddings)}, "
+            f"value={'None' if new_embeddings is None else f'shape={np.array(new_embeddings).shape}'}"
+        )
     except requests.exceptions.Timeout as e:
-        logger.exception(f"Timeout error occured while embedding: {e}")
+        # BUG WAS HERE: exception was swallowed, new_embeddings left undefined
+        logger.exception(f"Timeout error occurred while embedding (will raise): {e}")
+        raise  # ← re-raise so backoff decorator can retry
     except Exception as e:
-        logger.exception(e)
-        if any(tiktoken_client.count(text) > 8192 for text in batch):
+        logger.exception(f"Unexpected error during embedding: {e}")
+        if any(tiktoken_client.count(text) > 8192 for text in uncached_batch):
             logger.warning(
-                f"Token count exceeded for batch: {max([tiktoken_client.count(text) for text in batch])} truncating down to 8192 tokens."
+                f"Token count exceeded, max={max([tiktoken_client.count(text) for text in uncached_batch])}, "
+                f"truncating to 8192 tokens and retrying"
             )
-            batch = [tiktoken_client.truncate_string(text) for text in batch]
-            new_embeddings = openai_call_embedding(batch)
+            uncached_batch = [tiktoken_client.truncate_string(text) for text in uncached_batch]
+            new_embeddings = openai_call_embedding(uncached_batch)
+            logger.debug(f"Retry after truncation returned type={type(new_embeddings)}")
         else:
-            raise e
-    # get all indices where embeddings are None
+            raise
+
+    # Guard: new_embeddings must not be None at this point
+    if new_embeddings is None:
+        logger.error(
+            f"new_embeddings is None after API call — "
+            f"batch size={len(uncached_batch)}, "
+            f"sample text[:100]={uncached_batch[0][:100] if uncached_batch else 'empty'}"
+        )
+        raise ValueError(
+            f"openai_call_embedding returned None for batch of size {len(uncached_batch)}"
+        )
+
     indices = [i for i, emb in enumerate(embeddings) if emb is None]
-    # store the new embeddings in the correct position
-    assert len(indices) == len(new_embeddings)
+    logger.debug(f"Indices to fill: {len(indices)}, new_embeddings length: {len(new_embeddings)}")
+
+    if len(indices) != len(new_embeddings):
+        logger.error(
+            f"Length mismatch: indices={len(indices)}, new_embeddings={len(new_embeddings)}, "
+            f"total batch={len(batch)}, uncached={len(uncached_batch)}"
+        )
+        raise ValueError(
+            f"Embedding count mismatch: expected {len(indices)}, got {len(new_embeddings)}"
+        )
+
     for i, index in enumerate(indices):
         embeddings[index] = new_embeddings[i]
+
     # store in cache
     try:
         for cache_key, embedding in zip(cache_keys, embeddings):
             vector_cache.set(cache_key, embedding)
         embeddings = np.array(embeddings)
+        logger.debug(f"Stored {len(cache_keys)} embeddings in cache, final shape: {embeddings.shape}")
     except Exception as e:
         logger.warning(f"Error storing embeddings in cache: {e}")
+
     return embeddings
 
 
