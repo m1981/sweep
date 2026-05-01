@@ -7,10 +7,9 @@ import { Extension } from '@uiw/react-codemirror'
 const codeStyle = dracula
 
 const modelMap: Record<string, string> = {
-  'claude-3-5-sonnet-20240620': 'Sonnet 3.5',
-  'claude-3-opus-20240229': 'Opus',
-  'claude-3-sonnet-20240229': 'Sonnet',
-  'claude-3-haiku-20240307': 'Haiku',
+  'claude-opus-4-7': 'Opus 4.7',
+  'claude-sonnet-4-6': 'Sonnet 4.6',
+  'claude-haiku-4-5': 'Haiku 4.5',
   'gpt-4o': 'GPT-4o',
 }
 
@@ -38,7 +37,7 @@ const languageMapping: Record<string, Extension> = {
 }
 
 const DEFAULT_K: number = 8
-const DEFAULT_MODEL = 'claude-3-5-sonnet-20240620'
+const DEFAULT_MODEL = 'claude-4-6-sonnet'
 
 export {
   codeStyle,
