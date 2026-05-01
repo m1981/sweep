@@ -17,9 +17,9 @@ from pylint.lint import Run
 from pylint.reporters.text import TextReporter
 from loguru import logger
 from tree_sitter import Node, Parser, Language
-from sweepai.utils.tree_sitter_shim import get_language, get_parser
 import tree_sitter_python
 import tree_sitter_javascript
+import tree_sitter_typescript
 
 from sweepai.core.entities import Snippet
 from sweepai.logn.cache import file_cache
@@ -29,16 +29,23 @@ warnings.simplefilter("ignore", category=FutureWarning)
 
 AVG_CHAR_IN_LINE = 60
 
+
 def get_parser(language: str):
     parser = Parser()
+
     if language in ("python", "py"):
-        lang = Language(tree_sitter_python.language(), "python")
+        lang = Language(tree_sitter_python.language())
     elif language in ("javascript", "js"):
-        lang = Language(tree_sitter_javascript.language(), "javascript")
+        lang = Language(tree_sitter_javascript.language())
+    elif language in ("typescript", "ts", "tsx"):
+        lang = Language(tree_sitter_typescript.language_tsx())
     else:
-        return tree_sitter_get_parser(language)
-    parser.set_language(lang)
+        # Fallback to naive chunking if we don't have the parser
+        raise ValueError(f"Unsupported tree-sitter language: {language}")
+
+    parser.language = lang
     return parser
+
 
 def non_whitespace_len(s: str) -> int:  # new len function
     return len(re.sub("\s", "", s))
@@ -52,6 +59,7 @@ def get_line_number(index: int, source_code: str) -> int:
         if total_chars > index:
             return line_number - 1
     return line_number
+
 
 @dataclass
 class Span:
@@ -86,8 +94,6 @@ class Span:
     def __len__(self) -> int:
         # i.e. Span(a, b) = b - a
         return self.end - self.start
-
-
 
 
 def chunk_tree(
@@ -133,7 +139,7 @@ def chunk_tree(
         current_chunk += chunk
         # if the current chunk starts with a closing parenthesis, bracket, or brace, we coalesce it with the previous chunk
         stripped_contents = current_chunk.extract(source_code.decode("utf-8")).strip()
-        first_char = stripped_contents[0] if stripped_contents else ''
+        first_char = stripped_contents[0] if stripped_contents else ""
         if first_char in [")", "}", "]"] and new_chunks:
             new_chunks[-1] += chunk
             current_chunk = Span(chunk.end, chunk.end)
@@ -214,6 +220,7 @@ def naive_chunker(code: str, line_count: int = 30, overlap: int = 15):
 
     return chunks
 
+
 def get_new_lint_errors_for_pylint(new_errors: str, old_errors: str) -> str:
     # Example of error: "main.py:1585:12: W0612: Unused variable 'command' (unused-variable)"
     additional_errors = patience_fuzzy_additions(old_errors, new_errors).splitlines()
@@ -225,15 +232,20 @@ def get_new_lint_errors_for_pylint(new_errors: str, old_errors: str) -> str:
     results = []
     try:
         for line in additional_errors:
-            if line.count(" ") >= 2: # sometimes the error doesn't have enough spaces, which raises an error
+            if (
+                line.count(" ") >= 2
+            ):  # sometimes the error doesn't have enough spaces, which raises an error
                 _file_delimiter, error_type, *_ = line.split(" ")
             else:
                 _file_delimiter, error_type = line.split(" ")
-            if error_type.startswith("E") or old_error_types.count(error_type) < 2: # if there are more than 1 of the same error, we consider it new
+            if (
+                error_type.startswith("E") or old_error_types.count(error_type) < 2
+            ):  # if there are more than 1 of the same error, we consider it new
                 results.append(line)
     except Exception as e:
         logger.info(f"Error in get_new_lint_errors_for_pylint: {e}")
     return "\n".join(results)
+
 
 def get_new_lint_errors_for_eslint(new_errors: str, old_errors: str) -> str:
     # Example of error: "main.py:1585:12: W0612: Unused variable 'command' (unused-variable)"
@@ -246,7 +258,9 @@ def get_new_lint_errors_for_eslint(new_errors: str, old_errors: str) -> str:
     results = []
     for line in additional_errors:
         *_, error_type = line.split(" ")
-        if not line.startswith("✖") and old_error_types.count(error_type) < 2: # if there are more than 1 of the same error, we consider it new
+        if (
+            not line.startswith("✖") and old_error_types.count(error_type) < 2
+        ):  # if there are more than 1 of the same error, we consider it new
             results.append(line)
     return "\n".join(results)
 
@@ -264,8 +278,10 @@ class CheckResults:
             return True
         if other.parse_error_message:
             return False
-        return len(self.pylint.splitlines()) > len(other.pylint.splitlines()) or len(self.eslint.splitlines()) > len(other.eslint.splitlines())
-    
+        return len(self.pylint.splitlines()) > len(other.pylint.splitlines()) or len(
+            self.eslint.splitlines()
+        ) > len(other.eslint.splitlines())
+
     def is_worse_than_message(self, other: CheckResults) -> str:
         if other.parse_error_message:
             # Previously failing
@@ -274,27 +290,37 @@ class CheckResults:
             return self.parse_error_message
         if len(self.pylint.splitlines()) > len(other.pylint.splitlines()):
             # return f"The code has the following pylint errors:\n\n{self.pylint}"
-            new_pylint_errors = get_new_lint_errors_for_pylint(self.pylint, other.pylint)
+            new_pylint_errors = get_new_lint_errors_for_pylint(
+                self.pylint, other.pylint
+            )
             if not other.pylint:
                 return f"The code has the following pylint errors:\n\n{self.pylint}"
             elif not new_pylint_errors:
                 # All the errors are invalid
                 return ""
-            return f"The following new pylint errors have appeared:\n\n{new_pylint_errors}"
+            return (
+                f"The following new pylint errors have appeared:\n\n{new_pylint_errors}"
+            )
         if len(self.eslint.splitlines()) > len(other.eslint.splitlines()):
-            new_eslint_errors = get_new_lint_errors_for_eslint(self.eslint, other.eslint)
+            new_eslint_errors = get_new_lint_errors_for_eslint(
+                self.eslint, other.eslint
+            )
             if not other.eslint:
                 return f"The code has the following eslint errors:\n\n{self.eslint}"
             elif not new_eslint_errors:
                 # All the errors are invalid
                 return ""
-            return f"The following new eslint errors have appeared:\n\n{new_eslint_errors}"
+            return (
+                f"The following new eslint errors have appeared:\n\n{new_eslint_errors}"
+            )
         return ""
+
 
 def strip_ansi_codes(text: str) -> str:
     # ANSI escape sequences (color codes) are often starting with ESC ([) followed by some numbers and ends with "m".
-    ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]')
-    return ansi_escape.sub('', text)
+    ansi_escape = re.compile(r"(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]")
+    return ansi_escape.sub("", text)
+
 
 def check_valid_typescript(file_path: str, code: str) -> tuple[bool, str]:
     is_valid = True
@@ -311,17 +337,19 @@ def check_valid_typescript(file_path: str, code: str) -> tuple[bool, str]:
         # Create a temporary file to hold the TypeScript code
         with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as temp_file:
             temp_file_path = temp_file.name
-            temp_file.write(code.encode('utf-8'))
-        
+            temp_file.write(code.encode("utf-8"))
+
         # Run `tsc` on the temporary file
         try:
             commands = ["tsc", "--pretty", "--noEmit", temp_file_path]
-            result = subprocess.run(" ".join(commands), shell=True, text=True, capture_output=True)
+            result = subprocess.run(
+                " ".join(commands), shell=True, text=True, capture_output=True
+            )
 
             if result.returncode != 0:
                 message = strip_ansi_codes(result.stdout)
                 index = message.index(temp_file_path)
-                full_temp_file_path = message[:index + len(temp_file_path)]
+                full_temp_file_path = message[: index + len(temp_file_path)]
                 message = message.replace(full_temp_file_path, file_path)
 
                 # import error is TS2307 and should come up after the syntax check
@@ -349,6 +377,7 @@ def check_valid_typescript(file_path: str, code: str) -> tuple[bool, str]:
             os.remove(temp_file_path)
     return is_valid, message
 
+
 def check_syntax(file_path: str, code: str) -> tuple[bool, str]:
     ext = file_path.split(".")[-1]
     if ext in extension_to_language:
@@ -365,11 +394,10 @@ def check_syntax(file_path: str, code: str) -> tuple[bool, str]:
         except SyntaxError as e:
             error_message = f"Python syntax error: {e.msg} at line {e.lineno}"
             return False, error_message
-    
+
     # we can't do this right now unfortunately as we don't have a way to mimic the production env for the code
     # if ext in ["ts"]:
     #     return check_valid_typescript(file_path, code)
-
 
     def find_deepest_error(node: Node) -> Optional[Node]:
         deepest_error = None
@@ -387,15 +415,19 @@ def check_syntax(file_path: str, code: str) -> tuple[bool, str]:
         end_line, end_col = error_location.end_point
         code_lines = code.split("\n")
         surrounding_lines = 3
-        error_code_lines = code_lines[max(0, start_line - surrounding_lines):start_line]
+        error_code_lines = code_lines[
+            max(0, start_line - surrounding_lines) : start_line
+        ]
         if start_line == end_line:
             error_code_lines += [code_lines[start_line]]
             error_code_lines += [" " * start_col + "^" * max(end_col - start_col, 1)]
         else:
             error_code_lines += ["=== ERROR START ==="]
-            error_code_lines += code_lines[start_line:end_line + 1]
+            error_code_lines += code_lines[start_line : end_line + 1]
             error_code_lines += ["=== ERROR END ==="]
-        error_code_lines += code_lines[end_line + 1:min(len(code_lines) - 1, end_line + surrounding_lines)]
+        error_code_lines += code_lines[
+            end_line + 1 : min(len(code_lines) - 1, end_line + surrounding_lines)
+        ]
         error_span = "\n".join(error_code_lines)
         if start_line == end_line:
             error_message = f"Invalid syntax found at line {start_line}, displayed below:\n{error_span}"
@@ -403,6 +435,7 @@ def check_syntax(file_path: str, code: str) -> tuple[bool, str]:
             error_message = f"Invalid syntax found from {start_line}-{end_line}, displayed below:\n{error_span}"
         return (False, error_message)
     return True, ""
+
 
 # Need to add "no-unused-vars": "error"
 # Need to add "import/first": "error"
@@ -448,8 +481,8 @@ DEFAULT_ESLINTRC = """{
 
 pylint_args_non_last_fcr = [
     "--disable=C",
-    "--enable=C0413", # Enable only the check for imports not at the top
-    "--disable=W0611", # Don't check unused import
+    "--enable=C0413",  # Enable only the check for imports not at the top
+    "--disable=W0611",  # Don't check unused import
     "--disable=R",
     "--disable=import-error",
     "--disable=no-member",
@@ -459,14 +492,17 @@ pylint_args_non_last_fcr = [
 pylint_args_last_fcr = [
     "--disable=C",
     "--enable=C0413",
-    "--enable=W0611", # Check unused import
+    "--enable=W0611",  # Check unused import
     "--disable=R",
     "--disable=import-error",
     "--disable=no-member",
 ]
 
+
 @file_cache()
-def get_pylint_check_results(file_path: str, code: str, last_fcr_for_file=False) -> CheckResults:
+def get_pylint_check_results(
+    file_path: str, code: str, last_fcr_for_file=False
+) -> CheckResults:
     logger.debug(f"Running pylint on {file_path}...")
     file_hash = uuid.uuid4().hex
     new_file = os.path.join("/tmp", file_hash + "_" + os.path.basename(file_path))
@@ -476,7 +512,9 @@ def get_pylint_check_results(file_path: str, code: str, last_fcr_for_file=False)
     pylint_output = StringIO()
     reporter = TextReporter(pylint_output)
     # this allows us to have a more rigorous check for the last file change request
-    pylint_args = [new_file] + (pylint_args_last_fcr if last_fcr_for_file else pylint_args_non_last_fcr)
+    pylint_args = [new_file] + (
+        pylint_args_last_fcr if last_fcr_for_file else pylint_args_non_last_fcr
+    )
     Run(
         pylint_args,
         reporter=reporter,
@@ -489,20 +527,29 @@ def get_pylint_check_results(file_path: str, code: str, last_fcr_for_file=False)
         pass
     succeeded = error_message.startswith("------------------------------------")
     if error_message:
-        error_message = error_message.replace(new_file, file_path).replace(f"{file_hash}_" + stem, stem)
-        error_message = error_message.split("-----------------------------------", 1)[0].strip()
+        error_message = error_message.replace(new_file, file_path).replace(
+            f"{file_hash}_" + stem, stem
+        )
+        error_message = error_message.split("-----------------------------------", 1)[
+            0
+        ].strip()
         error_message = f"> pylint {file_path}\n\n" + error_message
     logger.debug("Done running pylint.")
     return CheckResults(pylint=error_message if not succeeded else "")
 
-def get_check_results(file_path: str, code: str, last_fcr_for_file=False) -> CheckResults:
+
+def get_check_results(
+    file_path: str, code: str, last_fcr_for_file=False
+) -> CheckResults:
     is_valid, error_message = check_syntax(file_path, code)
     if not is_valid:
         return CheckResults(parse_error_message=error_message)
-    ext = file_path.rsplit(".")[-1] # noqa
+    ext = file_path.rsplit(".")[-1]  # noqa
     if ext == "py":
         try:
-            return get_pylint_check_results(file_path, code, last_fcr_for_file=last_fcr_for_file)
+            return get_pylint_check_results(
+                file_path, code, last_fcr_for_file=last_fcr_for_file
+            )
         except Exception as e:
             logger.exception(e)
     elif ext in ["js", "jsx", "ts", "tsx"]:
@@ -517,7 +564,9 @@ def get_check_results(file_path: str, code: str, last_fcr_for_file=False) -> Che
                 shell=True,
             )
         except subprocess.TimeoutExpired:
-            raise Exception("ESLint timed out after 5s. You need eslint to edit js/ts files. Run `npm i -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-import eslint-plugin-react`.")
+            raise Exception(
+                "ESLint timed out after 5s. You need eslint to edit js/ts files. Run `npm i -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-import eslint-plugin-react`."
+            )
         # Check eslint < v9 and all the plugins exist
         if result.returncode == 0:
             with TemporaryDirectory(dir=os.getcwd()) as temp_dir:
@@ -529,7 +578,14 @@ def get_check_results(file_path: str, code: str, last_fcr_for_file=False) -> Che
                 with open(new_file, "w") as f:
                     f.write(code)
                 try:
-                    eslint_commands = ["npx", "eslint", new_file, "--config", config_file, "--no-ignore"]
+                    eslint_commands = [
+                        "npx",
+                        "eslint",
+                        new_file,
+                        "--config",
+                        config_file,
+                        "--no-ignore",
+                    ]
                     result = subprocess.run(
                         " ".join(eslint_commands),
                         capture_output=True,
@@ -537,12 +593,17 @@ def get_check_results(file_path: str, code: str, last_fcr_for_file=False) -> Che
                         shell=True,
                         timeout=30,
                     )
-                    error_message = (result.stdout + "\n\n" + result.stderr).strip().replace(new_file, file_path)
+                    error_message = (
+                        (result.stdout + "\n\n" + result.stderr)
+                        .strip()
+                        .replace(new_file, file_path)
+                    )
                     return CheckResults(eslint=error_message)
                 except subprocess.TimeoutExpired:
                     logger.warning(f"ESLint timed out after 30s for {file_path}")
                     pass
     return CheckResults()
+
 
 PRETTIERRC_FILES = [
     ".prettierrc",
@@ -552,6 +613,7 @@ PRETTIERRC_FILES = [
     ".prettierrc.js",
     "prettier.config.js",
 ]
+
 
 def format_file(file_path: str, code: str, cwd: str | None = None) -> str:
     """
@@ -569,7 +631,7 @@ def format_file(file_path: str, code: str, cwd: str | None = None) -> str:
                 with open(full_path, "r") as f:
                     prettier_config_contents = f.read()
                 break
-                
+
         if not prettier_config_path or not prettier_config_contents:
             return code
 
@@ -598,6 +660,7 @@ def format_file(file_path: str, code: str, cwd: str | None = None) -> str:
                 logger.error(e)
                 return code
     return code
+
 
 # @file_cache()
 def chunk_code(
@@ -655,21 +718,23 @@ def get_function_name(file_name: str, source_code: str, line_number: int):
     type_mapping_per_language = {
         "python": "function_definition",
         "tsx": "function_declaration",
-        "js": "function_declaration"
+        "js": "function_declaration",
     }
     function_type_string = type_mapping_per_language.get(language)
     parser = get_parser(language)
 
     # Parse the source code
-    tree = parser.parse(bytes(source_code, 'utf8'))
+    tree = parser.parse(bytes(source_code, "utf8"))
 
     # Get the root node of the syntax tree
     root_node = tree.root_node
 
     # Find the function node that contains the given line number
-    function_node = root_node.descendant_for_point_range((line_number, 0), (line_number, 1))
+    function_node = root_node.descendant_for_point_range(
+        (line_number, 0), (line_number, 1)
+    )
 
-    max_depth = 25 # Maximum depth to search for the function node
+    max_depth = 25  # Maximum depth to search for the function node
     while function_node.type != function_type_string:
         function_node = function_node.parent
         max_depth -= 1
@@ -677,9 +742,10 @@ def get_function_name(file_name: str, source_code: str, line_number: int):
             return None
 
     # Extract the function name
-    function_name = function_node.child_by_field_name('name').text.decode('utf8')
+    function_name = function_node.child_by_field_name("name").text.decode("utf8")
 
     return function_name
+
 
 def extract_definitions(file_name, code):
     ext = file_name.split(".")[-1]
@@ -691,7 +757,11 @@ def extract_definitions(file_name, code):
     type_mapping_per_language = {
         "typescript": ["class_declaration", "method_definition"],
         "tsx": ["function_declaration", "class_declaration", "method_definition"],
-        "javascript": ["function_declaration", "class_declaration", "method_definition"]
+        "javascript": [
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+        ],
     }
     function_type_strings = type_mapping_per_language.get(language)
 
@@ -714,6 +784,7 @@ def extract_definitions(file_name, code):
             traverse_node(child)
 
     traverse_node(tree.root_node)
+
 
 if __name__ == "__main__":
     test_code = """
@@ -754,13 +825,13 @@ import numpy
   import { loadConfettiPreset } from "tsparticles-preset-confetti";
   import { useState } from "react";
   import logo from "../assets/icon.png";
-  
+
   import ExternalLinkWithText from "./ExternalLinkWithText";
   import { TypeAnimation } from "react-type-animation";
   import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
   import { faUsers } from '@fortawesome/free-solid-svg-icons';
   const demo = require("../assets/demo.mp4");
-  
+
 export default function CallToAction() {
     const [spin, setSpin] = useState(false);
     // const canvas = document.getElementById('canvas3d');
@@ -773,7 +844,7 @@ export default function CallToAction() {
 }
 """
     extract_definitions("main.tsx", typescript_code)
-    breakpoint() # noqa
+    breakpoint()  # noqa
     python_code = """\
 import math
 import pandas
@@ -791,6 +862,8 @@ def get_circle_area(radius: float) -> float:
     # check_results = check_syntax("test.js", new_code)
     check_results = get_check_results("test.tsx", typescript_code)
     check_results = get_check_results("test.py", python_code)
-    assert check_results.pylint == "" # this should pass
+    assert check_results.pylint == ""  # this should pass
     check_results = get_check_results("test.py", python_code, last_fcr_for_file=True)
-    assert "Unused import pandas" in check_results.pylint # this should warn about unused imports
+    assert (
+        "Unused import pandas" in check_results.pylint
+    )  # this should warn about unused imports
