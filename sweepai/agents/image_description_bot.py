@@ -17,7 +17,7 @@ The text in the image.
 ...
 </image_descriptions>"""
 
-CLAUDE_MODEL = "claude-3-opus-20240229"
+CLAUDE_MODEL = "claude-opus-4-7"
 
 class ImageDescriptionBot(ChatGPT):
     def describe_images(

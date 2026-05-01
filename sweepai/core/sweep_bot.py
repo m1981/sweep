@@ -492,7 +492,7 @@ def get_files_to_change(
             ),
         ],
     )
-    MODEL = "claude-3-opus-20240229"
+    MODEL = "claude-sonnet-4-6"
 
     renames_response = renames_chat_gpt.chat_anthropic(
         content=joint_message + "\n\n" + anthropic_rename_prompt,
@@ -807,7 +807,7 @@ def get_files_to_change_for_on_comment(
             ),
         ],
     )
-    MODEL = "claude-3-opus-20240229"
+    MODEL = "claude-sonnet-4-6"
 
     renames_response = renames_chat_gpt.chat_anthropic(
         content=joint_message + "\n\n" + rename_on_comment_prompt,
@@ -1128,7 +1128,7 @@ def context_get_files_to_change(
             ),
         ],
     )
-    MODEL = "claude-3-opus-20240229"
+    MODEL = "claude-sonnet-4-6"
     open("msg.txt", "w").write(joint_message + "\n\n" + context_files_to_change_prompt)
     files_to_change_response = chat_gpt.chat_anthropic(
         content=joint_message + "\n\n" + context_files_to_change_prompt,
@@ -1307,7 +1307,7 @@ def get_files_to_change_for_test(
                 ),
             ],
         )
-        MODEL = "claude-3-opus-20240229"
+        MODEL = "claude-sonnet-4-6"
         files_to_change_response: str = chat_gpt.chat_anthropic(
             content=joint_message + "\n\n" + test_files_to_change_prompt,
             model=MODEL,
@@ -1460,7 +1460,7 @@ def get_files_to_change_for_gha(
                 ),
             ],
         )
-        MODEL = "claude-3-opus-20240229" if not use_faster_model else "claude-3-sonnet-20240229"
+        MODEL = "claude-sonnet-4-6" if not use_faster_model else "claude-3-sonnet-20240229"
         continuous_llm_calls(
             chat_gpt,
             content=joint_message + "\n\n" + gha_files_to_change_prompt,

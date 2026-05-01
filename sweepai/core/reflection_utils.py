@@ -343,7 +343,7 @@ Respond with your extremely critical analysis and feedback."""
 # 2. for each trajectory, run the assistant until it hits an error or end state
 #    - in either case perform self-reflection
 # 3. update the reflections section with the new reflections
-CLAUDE_MODEL = "claude-3-opus-20240229"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 class EvaluatorAgent(ChatGPT):
     def evaluate_run(self, problem_statement: str, run_text: str, stored_files: list[str]):

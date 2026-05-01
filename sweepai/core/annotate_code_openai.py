@@ -8,7 +8,7 @@ from sweepai.core.entities import Message
 from sweepai.logn.cache import file_cache
 from sweepai.utils.code_validators import chunk_code
 
-CLAUDE_MODEL = "claude-3-haiku-20240307"
+CLAUDE_MODEL = "claude-haiku-4-5"
 NUM_WORKERS = 4 # tune based on haiku rate limit
 
 system_prompt = """Analyze the provided source_code, GitHub issue, and code_to_annotate to generate an explanation with the following format:

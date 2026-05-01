@@ -619,8 +619,8 @@ def contains_ignoring_whitespace(needle: str, haystack: str):
             return start_line, end_line
     return False
 
-MODEL = "claude-3-5-sonnet-20240620"
-SLOW_MODEL = "claude-3-5-sonnet-20240620"
+MODEL = "claude-sonnet-4-6"
+SLOW_MODEL = "claude-sonnet-4-6"
 
 def validate_and_parse_function_call(
     function_calls_string: str, chat_gpt: ChatGPT

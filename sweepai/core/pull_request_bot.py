@@ -107,7 +107,7 @@ class PRSummaryBot(ChatGPT):
         commit_message_response = self.chat_anthropic(
             content=formatted_user_prompt,
             temperature=0.1,
-            model="claude-3-haiku-20240307",
+            model="claude-haiku-4-5",
         )
         commit_message = self.extract_commit_message(commit_message_response)
         if len(commit_message) > 50:
@@ -115,7 +115,7 @@ class PRSummaryBot(ChatGPT):
             shorter_commit_message_response = self.chat_anthropic(
                 content=shorter_commit_prompt,
                 temperature=0.1,
-                model="claude-3-haiku-20240307",
+                model="claude-haiku-4-5",
             )
             commit_message = self.extract_commit_message(shorter_commit_message_response)
         if not commit_message:

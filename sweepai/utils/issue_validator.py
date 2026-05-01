@@ -51,7 +51,7 @@ def validate_issue(issue: str) -> str:
         issue_validator_user_prompt.format(
             issue=issue
         ),
-        model="claude-3-opus-20240229",
+        model="claude-opus-4-7",
         temperature=0.0,
     )
     

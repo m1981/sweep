@@ -288,7 +288,7 @@ def get_client():
     )
     if OPENAI_API_TYPE == "anthropic":
         client = Anthropic()
-        model="claude-3-opus-20240229"
+        model="claude-sonnet-4-6"
     if OPENAI_API_TYPE == "openai":
         client = OpenAI(api_key=OPENAI_API_KEY, timeout=90) if OPENAI_API_KEY else None
         model = DEFAULT_GPT4_MODEL

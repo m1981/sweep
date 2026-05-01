@@ -142,7 +142,7 @@ def generate_query(query: str, cloned_repo: ClonedRepo, relevant_file_path: list
     )
     response = chatgpt.chat_anthropic(
         user_message,
-        model="claude-3-opus-20240229", # Sonnet doesn't work well with this prompt
+        model="claude-sonnet-4-6", # Sonnet doesn't work well with this prompt
     )
     match_ = re.search(r"<query>(.*?)</query>", response, re.DOTALL)
     if match_:
@@ -203,7 +203,7 @@ def get_relevant_commits(query: str, cloned_repo: ClonedRepo, relevant_file_path
     )
     response = chatgpt.chat_anthropic(
         user_prompt,
-        model="claude-3-opus-20240229", # Sonnet fails at this task
+        model="claude-sonnet-4-6", # Sonnet fails at this task
     )
     commits_pattern = re.compile(r"<commit>\s*?<sha>(?P<sha>.*?)</sha>\s*?<file_paths>\s*?(?P<file_paths>.*?)\s*?</file_paths>\s*?</commit>", re.DOTALL)
     result_str = ""

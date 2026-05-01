@@ -719,7 +719,7 @@ DEFAULT_FUNCTION_CALL = """<function_call>
 def rag(
     question: str,
     cloned_repo: ClonedRepo,
-    model="claude-3-5-sonnet-20240620"
+    model="claude-sonnet-4-6"
 ):
     chat_gpt = ChatGPT.from_system_message_string(
         prompt_string=search_agent_instructions + tools_available + "\n\n" + example_tool_calls,
@@ -774,7 +774,7 @@ def file_searcher(
     question: str,
     cloned_repo: ClonedRepo,
     existing_context: list[Snippet] = [],
-    model="claude-3-5-sonnet-20240620"
+    model="claude-sonnet-4-6"
 ):
     chat_gpt = ChatGPT.from_system_message_string(
         prompt_string=file_search_agent_instructions + file_searcher_tools_available + "\n\n" + example_tool_calls_file_searcher,

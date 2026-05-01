@@ -21,7 +21,7 @@ Short description of the pull request.
 Concise bulleted description of the pull request. Markdown format `variables`, `files`, and `directories` like this.
 </pr_description>"""
 
-CLAUDE_MODEL = "claude-3-haiku-20240307"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 class PRDescriptionBot(ChatGPT):
     def describe_diffs(

@@ -64,22 +64,10 @@ AnthropicModel = (
 
 ChatModel = OpenAIModel | AnthropicModel
 model_to_max_tokens = {
-    "gpt-3.5-turbo": 4096,
-    "gpt-3.5-turbo-1106": 16385,
-    "gpt-3.5-turbo-16k": 16385,
-    "gpt-4-1106-preview": 128000,
-    "gpt-4-0125-preview": 128000,
-    "gpt-4-turbo-2024-04-09": 128000,
     "gpt-4o": 128000,
-    "claude-v1": 9000,
-    "claude-v1.3-100k": 100000,
-    "claude-instant-v1.3-100k": 100000,
-    "anthropic.claude-3-haiku-20240229-v1:0": 200000,
-    "anthropic.claude-3-sonnet-20240229-v1:0": 200000,
-    "claude-3-opus-20240229": 200000,
-    "claude-3-sonnet-20240229": 200000,
-    "claude-3-5-sonnet-20240620": 200000,
-    "claude-3-haiku-20240307": 200000,
+    "claude-opus-4-7": 200000,
+    "claude-sonnet-4-6": 200000,
+    "claude-haiku-4-5": 200000,
     "gpt-3.5-turbo-16k-0613": 16000,
 }
 default_temperature = 0.1
@@ -355,7 +343,7 @@ class ChatGPT(MessageList):
         self,
         content: str,
         assistant_message_content: str = "",
-        model: ChatModel = "claude-3-haiku-20240307",
+        model: ChatModel = "claude-haiku-4-5",
         message_key: str | None = None,
         temperature: float | None = None,
         stop_sequences: list[str] = [],

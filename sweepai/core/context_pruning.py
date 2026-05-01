@@ -704,7 +704,7 @@ def update_assistant_conversation(
         ticket_progress.save()
 
 
-CLAUDE_MODEL = "claude-3-haiku-20240307"
+CLAUDE_MODEL = "claude-haiku-4-5"
 
 
 def validate_and_parse_function_calls(

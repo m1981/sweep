@@ -284,6 +284,7 @@ def wrapped_search_codebase(
     local_path = f"/Users/michal/PycharmProjects/{repo}"
 
     logger.info(f"[DEBUG] wrapped_search_codebase called for {repo_name}")
+    logger.info(f"[DEBUG] Reading from local path: {local_path}")
 
     if not os.path.exists(local_path):
         yield f"Error: Local path {local_path} does not exist.", []
@@ -365,12 +366,13 @@ def search_codebase(
 ):
     with Timer() as timer:
         org_name, repo = repo_name.split("/")
-        if not os.path.exists(f"{repo_cache}/{repo}"):
-            print(f"Cloning {repo_name} to {repo_cache}/{repo}")
-            git.Repo.clone_from(f"https://x-access-token:{access_token}@github.com/{repo_name}", f"{repo_cache}/{repo}")
-            print(f"Cloned {repo_name} to {repo_cache}/{repo}")
-        cloned_repo = MockClonedRepo(f"{repo_cache}/{repo}", repo_name, token=access_token)
-        cloned_repo.pull()
+        # Point directly to your local project folder
+        local_path = f"/Users/michal/PycharmProjects/{repo}"
+
+        logger.info(f"[DEBUG] search_codebase called for {repo_name}")
+
+        # Use MockClonedRepo pointing to your local disk (NO GIT CLONE, NO GIT PULL)
+        cloned_repo = MockClonedRepo(local_path, repo_name, token="mock")
 
         if use_optimized_query:
             yield "Optimizing query...", []
@@ -455,7 +457,7 @@ def chat_codebase_stream(
     access_token: str,
     metadata: dict = {},
     k: int = DEFAULT_K,
-    model: str = "claude-3-opus-20240229",
+    model: str = "claude-sonnet-4-6",
     branch: str = None,
 ):
     EXPAND_SIZE = 100

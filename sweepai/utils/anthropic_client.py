@@ -47,7 +47,7 @@ class AnthropicClient:
             self.client = Anthropic()
             if parea_client:
                 parea_client.wrap_anthropic_client(self.client)
-            self.model = "claude-3-opus-20240229"
+            self.model = "claude-4-6-opus"
             logger.info(f"Using Anthropic model: {self.model}")
 
     # returns the clients response object
