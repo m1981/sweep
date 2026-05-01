@@ -115,7 +115,7 @@ build: ## Build image for your current machine arch (auto-detected)
 
 .PHONY: run
 run: ## Run the container locally (detached)
-	.venv/bin/uvicorn sweepai.api:app --reload --port 8080
+	.venv/bin/uvicorn sweepai.api:app --reload --port 8080 --env-file .env
 
 ##@ Docker — explicit arch
 .PHONY: build-arm64
