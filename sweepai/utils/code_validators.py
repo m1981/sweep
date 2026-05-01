@@ -40,17 +40,68 @@ warnings.simplefilter("ignore", category=FutureWarning)
 AVG_CHAR_IN_LINE = 60
 
 
-def get_parser(language: str):
+def get_parser(language: str) -> Parser:
+    """
+    Returns a tree-sitter Parser configured for the given language string.
+    Raises ValueError if the language is not supported.
+    """
     parser = Parser()
 
-    if language in ("python", "py"):
-        lang = Language(tree_sitter_python.language())
-    elif language in ("javascript", "js"):
-        lang = Language(tree_sitter_javascript.language())
-    elif language in ("typescript", "ts", "tsx"):
-        lang = Language(tree_sitter_typescript.language_tsx())
-    else:
-        # Fallback to naive chunking if we don't have the parser
+    LANGUAGE_MAP = {
+        # Python
+        "python":       Language(tree_sitter_python.language()),
+        "py":           Language(tree_sitter_python.language()),
+
+        # JavaScript
+        "javascript":   Language(tree_sitter_javascript.language()),
+        "js":           Language(tree_sitter_javascript.language()),
+        "jsx":          Language(tree_sitter_javascript.language()),
+
+        # TypeScript
+        "typescript":   Language(tree_sitter_typescript.language_typescript()),
+        "ts":           Language(tree_sitter_typescript.language_typescript()),
+        "tsx":          Language(tree_sitter_typescript.language_tsx()),
+
+        # HTML
+        "html":         Language(tree_sitter_html.language()),
+        "htm":          Language(tree_sitter_html.language()),
+
+        # CSS
+        "css":          Language(tree_sitter_css.language()),
+
+        # JSON
+        "json":         Language(tree_sitter_json.language()),
+
+        # YAML
+        "yaml":         Language(tree_sitter_yaml.language()),
+        "yml":          Language(tree_sitter_yaml.language()),
+
+        # TOML
+        "toml":         Language(tree_sitter_toml.language()),
+
+        # Bash / Shell
+        "bash":         Language(tree_sitter_bash.language()),
+        "sh":           Language(tree_sitter_bash.language()),
+        "shell":        Language(tree_sitter_bash.language()),
+
+        # SQL
+        "sql":          Language(tree_sitter_sql.language()),
+
+        # Markdown
+        "markdown":     Language(tree_sitter_markdown.language()),
+        "md":           Language(tree_sitter_markdown.language()),
+
+        # Dockerfile
+        "dockerfile":   Language(tree_sitter_dockerfile.language()),
+
+        # Makefile
+        "make":         Language(tree_sitter_make.language()),
+        "makefile":     Language(tree_sitter_make.language()),
+    }
+
+    lang = LANGUAGE_MAP.get(language.lower())
+
+    if lang is None:
         raise ValueError(f"Unsupported tree-sitter language: {language}")
 
     parser.language = lang
