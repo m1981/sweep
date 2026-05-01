@@ -37,7 +37,7 @@ const languageMapping: Record<string, Extension> = {
 }
 
 const DEFAULT_K: number = 8
-const DEFAULT_MODEL = 'claude-4-6-sonnet'
+const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 export {
   codeStyle,
