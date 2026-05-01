@@ -29,7 +29,7 @@ import tree_sitter_sql
 import tree_sitter_bash
 import tree_sitter_css
 import tree_sitter_json
-import tree_sitter_tom
+import tree_sitter_toml
 
 from sweepai.core.entities import Snippet
 from sweepai.logn.cache import file_cache
